@@ -63,7 +63,7 @@ getRast <- function(iDp, vArry, coords, rEmpt, prj){
   return(r)
 }
 
-# 18 minutes for 49 models, 3 variables
+# 38 minutes for 49 models, 3 variables
 pt1 <- proc.time()
 for (id in idSbset){
 ann <- nc_open(paste0('Data/gcm_annual_mean/', id, 'o.pgclann.nc'))
@@ -96,7 +96,7 @@ pt2-pt1
 # Download monthly average .nc files
 moVect <- c('jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec')
 
-# 6 min for max values of 1 var in 49 models * 12 months
+# 10 min for max values of 1 var in 49 models * 12 months
 pt1 <- proc.time()
 for (id in idSbset){
   for (mo in moVect){
