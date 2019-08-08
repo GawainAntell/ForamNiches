@@ -3,22 +3,7 @@ library(raster)
 library(ncdf4)
 library(maptools)
 
-# model age increment is 1ky for 0-24 ka, then 4 ky up to 800,000 ka
-age <- c(0:23, seq(24, 800, by=4))
-
-# model IDs start with 'tei', plus one of [n, N, o] in every combination w a suffix
-dgt123 <- 'tei'
-dgt4 <- c('n','N','o','O')
-dgt5 <- c(letters, LETTERS, 0:9)
-mods <- vector()
-for (dgt4i in dgt4){
-  for (dgt5i in dgt5){
-    iMod <- paste0(dgt123, dgt4i, dgt5i)
-    mods <- c(mods, iMod)
-  }
-}
-mods <- head(mods, length(age))
-modMeta <- data.frame(id=mods, age_1000ka=age)
+modMeta <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
 
 # spp data binned at 16 ky resolution, so use same for GCMs
 ageSteps <- seq(8, 792, by=16)
