@@ -21,7 +21,7 @@ mods <- head(mods, length(age))
 modMeta <- data.frame(id=mods, age_1000ka=age)
 
 # spp data binned at 16 ky resolution, so use same for GCMs
-ageSteps <- seq(8, 782, by=16)
+ageSteps <- seq(8, 792, by=16)
 modSbset <- modMeta$age_1000ka %in% ageSteps
 idSbset <- as.character(modMeta$id[modSbset])
 
