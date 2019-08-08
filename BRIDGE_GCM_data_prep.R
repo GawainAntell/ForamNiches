@@ -27,10 +27,12 @@ modSbset <- modMeta$age_1000ka %in% ageSteps
 idSbset <- as.character(modMeta$id[modSbset])
 
 # direct download each simulation .nc file from BRIDGE website
-for (id in idSbset){
+for (i in 1:length(idSbset)){
+  age <- ageSteps[i]
+  id <- idSbset[i]
   rt <- 'https://www.paleo.bristol.ac.uk/ummodel/data/'
   adrs <- paste0(rt, id, '/climate/', id, 'o.pgclann.nc') 
-  dest <- paste0('Data/gcm_annual_mean/', id, 'o.pgclann.nc')
+  dest <- paste0('Data/gcm_annual_mean/', id, 'o.pgclann_', age, '.nc')
   # Windows needs 'wb' argument to know that a binary transfer is necessary:
   temp <- download.file(adrs, dest, quiet=TRUE, mode='wb') 
 }
@@ -42,7 +44,7 @@ vars <- c(# 'W_ym_dpth', # vertical motion
         #  'ucurrTot_ym_dpth', # W-E current
         #  'vcurrTot_ym_dpth', # N-S current
           'temp_ym_dpth', # potential temperature
-          'salinity_ym_dpth',
+        #  'salinity_ym_dpth',
           'otracer14_ym_dpth' # age of ocean water
 )
 
@@ -64,20 +66,23 @@ getRast <- function(iDp, vArry, coords, rEmpt, prj){
   return(r)
 }
 
-# 38 minutes for 49 models, 3 variables
+# 25 minutes for 50 models, 2 variables
 pt1 <- proc.time()
-for (id in idSbset){
-ann <- nc_open(paste0('Data/gcm_annual_mean/', id, 'o.pgclann.nc'))
+for (i in 1:length(idSbset)){
+  age <- ageSteps[i]
+  id <- idSbset[i]
+  ann <- nc_open(paste0('Data/gcm_annual_mean/', id, 'o.pgclann_', age, '.nc'))
 
-dpths <- ann$dim$depth$vals
-nDpths <- length(dpths)
+  dpths <- ann$dim$depth$vals
+  nDpths <- length(dpths)
 
 # extract at successive depths and export as brick
+# include age in file name or models that differ only in captalization will overwrite
 for (v in vars) {
   vAnn <- ncvar_get(ann, varid=v)
   rastL <- lapply(1:nDpths, getRast, vArry=vAnn, coords=llGrid, rEmpt=rEmpt, prj=llPrj)
   vBrk <- brick(rastL) 
-  expNm <- paste0('Data/gcm_annual_mean/', id, '_ann_', v, '.tif')
+  expNm <- paste0('Data/gcm_annual_mean/', id, age, '_ann_', v, '.tif')
   writeRaster(vBrk, nl=nDps, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
 }
 
@@ -97,20 +102,22 @@ pt2-pt1
 # Download monthly average .nc files
 moVect <- c('jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec')
 
-# 10 min for max values of 1 var in 49 models * 12 months
+# 10 min for max values of 1 var in 50 models * 12 months
 pt1 <- proc.time()
-for (id in idSbset){
+for (i in 1:length(idSbset)){
+  age <- ageSteps[i]
+  id <- idSbset[i]
   for (mo in moVect){
-  rt <- 'https://www.paleo.bristol.ac.uk/ummodel/data/'
-  adrs <- paste0(rt, id, '/climate/', id, 'o.pfcl', mo, '.nc') 
-  dest <- paste0('Data/gcm_monthly_mean/', id, 'o.pfcl', mo, '.nc')
-  # Windows needs 'wb' argument to know that a binary transfer is necessary:
-  temp <- download.file(adrs, dest, quiet=TRUE, mode='wb') 
+    rt <- 'https://www.paleo.bristol.ac.uk/ummodel/data/'
+    adrs <- paste0(rt, id, '/climate/', id, 'o.pfcl', mo, '.nc') 
+    dest <- paste0('Data/gcm_monthly_mean/', id, 'o.pfcl', mo, age, '.nc')
+    # Windows needs 'wb' argument to know that a binary transfer is necessary:
+    temp <- download.file(adrs, dest, quiet=TRUE, mode='wb') 
   }
   
   # Convert all months to (temporary) rasters
   # nc file to matrix to 1-column dataframe to spatialpoints to raster
-  moFiles <- paste0('Data/gcm_monthly_mean/', id, 'o.pfcl', moVect, '.nc')
+  moFiles <- paste0('Data/gcm_monthly_mean/', id, 'o.pfcl', moVect, age, '.nc')
   moDat <- lapply(moFiles, nc_open)
   moM <- lapply(moDat, ncvar_get, varid='temp_mm_dpth')
   moDf <- lapply(moM, function(x) data.frame('var'=as.vector(x)))
@@ -122,7 +129,7 @@ for (id in idSbset){
   moMax <- max(moBrk)
   moMax <- rotate(moMax)
   projection(moMax) <- llPrj
-  maxNm <- paste0('Data/gcm_monthly_mean/', id, '_max_month_temp.tif')
+  maxNm <- paste0('Data/gcm_monthly_mean/', id, age, '_max_month_temp.tif')
   writeRaster(moMax, filename=maxNm, format='GTiff', overwrite=TRUE)
 }
 pt2 <- proc.time()
