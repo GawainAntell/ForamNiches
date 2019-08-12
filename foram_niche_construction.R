@@ -41,13 +41,36 @@ for (fl in c(ann_fls,max_mo_fl)){
 names(r) <- env_nms
 llPrj <- proj4string(r[[1]])
 
-# Calculate 'available' environment from all occs in a bin
+# Limit analysis to species included in tree from Aze et al. 2011
+tr_raw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
+tr_raw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', tr_raw$Species.name)
+tr_raw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', tr_raw$Species.name)
+tr_paleo <- with(tr_raw, 
+                 as.paleoPhylo(Species.code, Ancestor.code, Start.date, End.date)
+)
+tr <- buildApe(tr_paleo)
+spp_codes <- tr$tip.label
+row_ordr <- match(spp_codes, tr_raw$Species.code)
+tr$tip.label <- tr_raw$Species.name[row_ordr]
+
+# Species must have > 5 occs to reconstruct niche with adequate precision
+spp <- unique(occ$species)
+spp_freq <- table(occ$species)
+too_scarce <- names( which(spp_freq<6) )
+
+# 8 species are not present in the phylogeny, mostly because microporiferate
+lost_spp <- setdiff(spp, tr$tip.label)
+rows2toss <- occ$species %in% union(lost_spp, too_scarce)
+occ <- occ[!rows2toss,]
+
+# Calculate 'available' environment from all occs in every bin
+# Calculated the same as for each species, so treat as if a species
 avlbl <- occ
 avlbl$species <- 'available'
 occ <- rbind(occ, avlbl)
 
-# Extract values at surface along each env axis, for each species
-
+spp <- unique(occ$species)
+n_spp <- length(spp)
 
 #############################
 # Retrieve eigenvalues for PC rotation of available environment
@@ -82,6 +105,7 @@ colnames(avlbl_by_stat) <- c(env_nms,'stat')
 # mean ann temp and max monthly temp are too collinear (cor=.8)
 med_rows <- avlbl_by_stat$stat=='med'
 avlbl_med <- avlbl_by_stat[med_rows,-6]
+cor(avlbl_med)
 ann_t_col <- which(env_nms=='ann_temp_ym_dpth')
 avlbl_med <- avlbl_med[,-ann_t_col]
 pc_avlbl <- prcomp(avlbl_med, center=TRUE, scale=TRUE)
@@ -130,42 +154,8 @@ nich <- spread(nich_long, key=axis, value=value)
 #############################
 # PCA of niche position
 
-# Species must have > 5 occs to reconstruct niche with adequate precision
-spp <- unique(occ$species)
-spp_freq <- table(occ$species)
-too_scarce <- names( which(spp_freq<6) )
-spp <- setdiff(spp, too_scarce)
-n_spp <- length(spp)
-
-# format fully-birfurcating tree from Aze et al. 2011
-tr_raw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
-tr_raw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', tr_raw$Species.name)
-tr_raw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', tr_raw$Species.name)
-tr_paleo <- with(tr_raw, 
-                 as.paleoPhylo(Species.code, Ancestor.code, Start.date, End.date)
-                 )
-tr <- buildApe(tr_paleo)
-spp_codes <- tr$tip.label
-row_ordr <- match(spp_codes, tr_raw$Species.code)
-tr$tip.label <- tr_raw$Species.name[row_ordr]
-
-# 8 species are not present in the phylogeny, mostly because microporiferate
-lost_spp <- setdiff(spp, tr$tip.label)
-lost_spp <- setdiff(lost_spp, 'available')
-rows2toss <- nich_by_stat$sp %in% lost_spp
-nich_by_stat <- nich_by_stat[!rows2toss,]
-
-# for (stat in sums){
-stat <- 'max'
-
-  sbset <- nich_by_stat$stat==stat
-  nich_part <- nich_by_stat[sbset,]
-  row_nms <- nich_part$sp
-  nich_part <- nich_part[,-(1:2)]
-  nich_part_scl <- apply(nich_part, 2, scale.default)
-  row.names(nich_part_scl) <- row_nms
-  
-  # rotate to PCA axes of available modern environment
-  nich_part_pc <- nich_part_scl*pc_rot
-# }
+nich_part <- nich_by_stat[,-(1:2)]
+nich_part_scl <- apply(nich_part, 2, scale.default)
+nich_part_pc <- nich_part_scl*pc_rot
+nich_part_pc <- cbind(nich_by_stat[,1:2], nich_part_pc)
 
