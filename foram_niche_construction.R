@@ -215,3 +215,6 @@ pc_rot <- pc_avlbl$rotation
 rot_nm <- paste0('Data/modern_available_env_PC_rotation_',day,'.csv')
 write.csv(pc_rot, rot_nm)
 
+nich_pc <- stats::predict(pc, nich_by_stat)
+fin <- cbind(nich_by_stat[,1:3], nich_pc)
+write.csv(fin, paste0('Data/niche_PC_4axes',day,'.csv'), row.names=FALSE)
