@@ -39,10 +39,6 @@ trilobus <- c('Globigerinoides.trilobus',
               NA,208,17.4,NA,7.0,NA,'Surface',NA)
 dpthTbl <- rbind(dpthTbl,trilobus)
 
-# Update basionym to MicroTax preferred name
-tenellus <- grep('Globigerinoides.tenellus',dpthTbl$Species)
-dpthTbl$Species[tenellus] <- 'Globoturborotalita.tenella'
-
 # Add depth ranges from Watkins et al. 1996
 
 # G menardii ranges from 20-60m, ALD of 25 read off fig 6c
@@ -50,7 +46,7 @@ menardii <- grep('Globorotalia.menardii',dpthTbl$Species)
 dpthTbl$ALD[menardii] <- 25
 dpthTbl$VD[menardii] <- 10
 dpthTbl$MaxAbund[menardii] <- 3
-dpthTbl$DepthHabitat <- 'Surface'
+dpthTbl$DepthHabitat[menardii] <- 'Surface'
 
 # G tumida ranges lives in upper 80m, ALD of 50 read off fig 4b
 tumida <- c('Globorotalia.tumida',
@@ -66,18 +62,18 @@ hexag <- c('Globorotaloides.hexagonus',
 dpthTbl <- rbind(dpthTbl,tumida,conglob,hexag)
 
 # Synonymize according to Microtax for congruence with occurrence database
+# Both synonyms of digitata (Beella and Hastigerinella) are present in depth dataset
+# use only Beella to match occurrences of the species
 dpthTbl$Species <- gsub('Globorotalia.scitula','Hirsutella.scitula',dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.inflata','Globoconella.inflata',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globorotalia.truncatulinoides','Truncorotalia.truncatulinoides',
-                        dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.hirsuta','Hirsutella.hirsuta',dpthTbl$Species)
 dpthTbl$Species <- gsub('Berggrenia.pumillio','Berggrenia.pumilio',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globorotalia.crassaformis','Truncorotalia.crassaformis',
-                        dpthTbl$Species)
-dpthTbl$Species <- gsub('Hastigerinella.digitata','Beella.digitata',dpthTbl$Species)
+dpthTbl$Species <- gsub('Globorotalia.crassaformis','Truncorotalia.crassaformis',dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.menardii','Menardella.menardii',dpthTbl$Species)
 dpthTbl$Species <- gsub('Globigerinoides.trilobus','Trilobatus.trilobus',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globigerinoides.ruber.white','Globigerinoides.ruber',
+dpthTbl$Species <- gsub('Globigerinoides.ruber.white','Globigerinoides.ruber',dpthTbl$Species)
+dpthTbl$Species <- gsub('Globigerinoides.tenellus','Globoturborotalita.tenella',dpthTbl$Species)
+dpthTbl$Species <- gsub('Globorotalia.truncatulinoides','Truncorotalia.truncatulinoides',
                         dpthTbl$Species)
 
 # Add depth data to sp-level dataset (except for 1st column, which would duplicate sp names)
