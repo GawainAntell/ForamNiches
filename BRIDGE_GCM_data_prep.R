@@ -21,8 +21,8 @@ mods <- head(mods, length(age))
 modMeta <- data.frame(id=mods, age_1000ka=age)
 # write.csv(modMeta, 'Data/gcm_model_codes.csv', row.names=FALSE)
 
-# spp data binned at 16 ky resolution, so use same for GCMs
-ageSteps <- seq(8, 792, by=16)
+# spp data binned at 4 ky resolution, so use same for GCMs
+ageSteps <- seq(4, 800, by=4)
 modSbset <- modMeta$age_1000ka %in% ageSteps
 idSbset <- as.character(modMeta$id[modSbset])
 
@@ -43,10 +43,11 @@ for (i in 1:length(idSbset)){
 vars <- c(# 'W_ym_dpth', # vertical motion
         #  'ucurrTot_ym_dpth', # W-E current
         #  'vcurrTot_ym_dpth', # N-S current
-          'temp_ym_dpth', # potential temperature
         #  'salinity_ym_dpth',
-          'otracer14_ym_dpth' # age of ocean water
-)
+          'temp_ym_dpth', # potential temperature
+          'otracer14_ym_dpth', # age of ocean water
+          'mixLyrDpth_ym_uo' # 1-D mixed layer depth
+          )
 
 # set up template raster, 1.25 degree increments (orignal scale)
 rEmpt <- raster(ncols=288, nrows= 144, xmn=0, xmx=360, ymn=-90, ymx=90)
@@ -76,24 +77,26 @@ for (i in 1:length(idSbset)){
   dpths <- ann$dim$depth$vals
   nDpths <- length(dpths)
 
-# extract at successive depths and export as brick
-# include age in file name or models that differ only in captalization will overwrite
+# Extract at successive depths (except for mixed layer depth, 1D) and export as brick
+# Include age in file name or models that differ only in captalization will overwrite
 for (v in vars) {
   vAnn <- ncvar_get(ann, varid=v)
-  rastL <- lapply(1:nDpths, getRast, vArry=vAnn, coords=llGrid, rEmpt=rEmpt, prj=llPrj)
-  vBrk <- brick(rastL) 
   expNm <- paste0('Data/gcm_annual_mean/', id, age, '_ann_', v, '.tif')
-  writeRaster(vBrk, nl=nDps, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
+  if (v=='mixLyrDpth_ym_uo'){
+    r <- rEmpt
+    values(r) <- t(vAnn)
+    writeRaster(r, nl=1, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
+  } else {
+    rastL <- lapply(1:nDpths, getRast, vArry=vAnn, coords=llGrid, rEmpt=rEmpt, prj=llPrj)
+    vBrk <- brick(rastL)
+    writeRaster(vBrk, nl=nDps, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
+  }
 }
 
 } # loop through models 
 pt2 <- proc.time()
-pt2-pt1
+(pt2-pt1)/60
 
-# NOTES for next iteration of analysis:
-# Average models within a time interval, e.g. 0ka, 4ka, 8ka, and 12ka models 
-# averaged to match with 0-16ka foram data.
-# Transform lat-long grid to equal-area projection.
 
 #################################################################
 # Build rasters of most extreme monthly temperatures in each cell
@@ -127,10 +130,12 @@ for (i in 1:length(idSbset)){
 
   # Find the hotest/coldest values per cell
   moMax <- max(moBrk)
-  moMax <- rotate(moMax)
-  projection(moMax) <- llPrj
-  maxNm <- paste0('Data/gcm_monthly_mean/', id, age, '_max_month_temp.tif')
-  writeRaster(moMax, filename=maxNm, format='GTiff', overwrite=TRUE)
+  moMin <- min(moBrk)
+  seasonal <- moMax - moMin
+  seasonal <- rotate(seasonal)
+  projection(seasonal) <- llPrj
+  ssnlNm <- paste0('Data/gcm_monthly_mean/', id, age, '_month_temp_range.tif')
+  writeRaster(seasonal, filename=ssnlNm, format='GTiff', overwrite=TRUE)
 }
 pt2 <- proc.time()
 (pt2-pt1)/60
