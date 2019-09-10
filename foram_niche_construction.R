@@ -18,59 +18,72 @@ day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 #############################
 # Read in occurrence and environmental data
 
+occ <- read.csv('Data/foram_uniq_occs_latlong_8ka190905.csv', stringsAsFactors=FALSE)
+bins <- unique(occ$bin)
+
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
-env_nms <- c('ann_otracer14_ym_dpth','ann_salinity_ym_dpth','ann_temp_ym_dpth',
-             'ann_W_ym_dpth','max_month_temp')
-get_r <- function(bin, env_nms){
-  mod_row <- modId$age_1000ka == bin
-  id <- modId$id[mod_row]
+envNms <- c('ann_otracer14_ym_dpth','ann_temp_ym_dpth',
+             'ann_mixLyrDpth_ym_uo','month_temp_range'
+            # 'ann_salinity_ym_dpth','ann_W_ym_dpth','max_month_temp'
+             )
+getR <- function(bin, envNms){
+  modRow <- modId$age_1000ka == bin
+  id <- modId$id[modRow]
   
-  # Annual files have 19 layers, but monthly max has only 1
-  r_all <- list.files('Data/', recursive = TRUE)
-  ann_pos <- intersect(grep(id, r_all), grep('dpth.tif', r_all))
-  max_mo_pos <- intersect(grep(id, r_all), grep('max', r_all))
-  ann_fls <- paste0('Data/', r_all[ann_pos])
-  max_mo_fl <- paste0('Data/', r_all[max_mo_pos])
-  r <- lapply(ann_fls, brick)
-  r <- append(r, raster(max_mo_fl))
-  names(r) <- env_nms
+  # Annual temp and water age files have 19 layers, 
+  # but temp seasonality and mix layer depth have only 1
+  rAll <- list.files('Data/', recursive = TRUE)
+  txt <- paste0(id,'.*tif')
+  rMod <- grep(txt, rAll)
+  thickPos <- intersect(rMod, grep('otracer|ann_temp', rAll))
+  flatPos <- intersect(rMod, grep('mixLyrDpth|temp_range', rAll))
+  
+  brickFls <- paste0('Data/', rAll[thickPos])
+  flatFls <- paste0('Data/', rAll[flatPos])
+  r1 <- lapply(brickFls, brick)
+  r2 <- lapply(flatFls, raster)
+  r <- append(r1, r2)
+  names(r) <- envNms
   r
 }
-modrn_r <- get_r(bin=8, env_nms=env_nms)
-llPrj <- proj4string(modrn_r[[1]])
+modrnR <- getR(bin=bins[1], envNms=envNms)
+llPrj <- proj4string(modrnR[[1]])
 
 # Limit analysis to species included in tree from Aze et al. 2011
-tr_raw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
-tr_raw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', tr_raw$Species.name)
-tr_raw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', tr_raw$Species.name)
-tr_paleo <- with(tr_raw, 
+trRaw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
+trRaw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', trRaw$Species.name)
+trRaw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', trRaw$Species.name)
+tr_paleo <- with(trRaw, 
                  as.paleoPhylo(Species.code, Ancestor.code, Start.date, End.date)
 )
 tr <- buildApe(tr_paleo)
-spp_codes <- tr$tip.label
-row_ordr <- match(spp_codes, tr_raw$Species.code)
-tr$tip.label <- tr_raw$Species.name[row_ordr]
-
-occ <- read.csv('Data/foram_uniq_occs_latlong190808.csv', stringsAsFactors=FALSE)
-bins <- unique(occ$bin)
+sppCodes <- tr$tip.label
+rowOrdr <- match(sppCodes, trRaw$Species.code)
+tr$tip.label <- trRaw$Species.name[rowOrdr]
 
 # 8 species are not present in the phylogeny, mostly because microporiferate
-spp_all <- unique(occ$species)
-lost_spp <- setdiff(spp_all, tr$tip.label)
+sppAll <- unique(occ$species)
+lostSpp <- setdiff(sppAll, tr$tip.label)
+
+# Beella megastoma is arguably the same species as B. digitata,
+# and Truncorotalia crassula is arguably senior synonym to crassaformis
+# (Schiebel and Hemleben 2017). The depth ranges for both are unknown.
+lostSpp <- c(lostSpp, 'Beella megastoma','Truncorotalia crassula')
 
 # Species must have > 5 occs in a bin to reconstruct niche with adequate precision
 spp <- vector()
 for (b in bins){
-  slc_bool <- occ$bin==b
-  slc_spp <- occ$species[slc_bool]
-  slc_freq <- table(slc_spp)
-  slc_ok <- names( which(slc_freq > 5) )
-  spp <- union(spp, slc_ok)
+  slcBool <- occ$bin==b
+  slcSpp <- occ$species[slcBool]
+  slcFreq <- table(slcSpp)
+  slcOk <- names( which(slcFreq > 5) )
+  spp <- union(spp, slcOk)
 }
 
-spp <- setdiff(spp, lost_spp)
+spp <- setdiff(spp, lostSpp)
 rows2toss <- ! occ$species %in% spp
 occ <- occ[!rows2toss,]
+
 row.names(occ) <- as.character(1:nrow(occ))
 
 #############################
@@ -98,7 +111,7 @@ bin_nich <- function(spp=NULL, bin, dat, bin_col, coord_cols, sp_col, prj, env_n
   slc_bool <- dat[,bin_col] == bin
   slc_dat <- dat[slc_bool,]
   
-  env_l <- get_r(bin=bin, env_nms=env_nms)
+  env_l <- get_r(bin=bin, envNms=envNms)
   
   nich <- matrix(nrow=0, ncol=5)
   for (sp in spp){
@@ -106,13 +119,13 @@ bin_nich <- function(spp=NULL, bin, dat, bin_col, coord_cols, sp_col, prj, env_n
     if (length(sp_rows) < 6){
       empt <- matrix(NA, nrow=length(env_l), ncol=5)
       empt[,1] <- sp
-      empt[,2] <- env_nms
+      empt[,2] <- envNms
       nich <- rbind(nich, empt)
     } else {
       sp_nich <- sapply(env_l, env_extract, sp=sp, dat=slc_dat, 
                         coord_cols=coord_cols, sp_col=sp_col, prj=prj
       )
-      sp_nich <- cbind(sp, env_nms, t(sp_nich))
+      sp_nich <- cbind(sp, envNms, t(sp_nich))
       nich <- rbind(nich,  sp_nich)
     }
   }
@@ -191,7 +204,7 @@ avlbl_cln <- lapply(1:3, function(i){
 }
 )
 avlbl_by_stat <- do.call(rbind, avlbl_cln)
-colnames(avlbl_by_stat) <- c(env_nms,'stat')
+colnames(avlbl_by_stat) <- c(envNms,'stat')
 
 # mean ann temp and max monthly temp are too collinear (cor=.8)
 med_rows <- avlbl_by_stat$stat=='med'
