@@ -28,7 +28,7 @@ idSbset <- as.character(modMeta$id[modSbset])
 
 # direct download each simulation .nc file from BRIDGE website
 for (i in 1:length(idSbset)){
-  age <- ageSteps[i]
+  age <- sprintf("%03d", ageSteps[i])
   id <- idSbset[i]
   rt <- 'https://www.paleo.bristol.ac.uk/ummodel/data/'
   adrs <- paste0(rt, id, '/climate/', id, 'o.pgclann.nc') 
@@ -57,10 +57,9 @@ lon <- seq(0, 358.75, length=288)
 llGrid <- expand.grid(lon, lat)
 colnames(llGrid) <- c('lon','lat')
 
-getRast <- function(iDp, vArry, coords, rEmpt, prj){ 
-  vDp <- vArry[,,iDp]
-  vDf <- data.frame('var'=as.vector(vDp))
-  pts <- SpatialPointsDataFrame(coords=coords, data=vDf)
+getRast <- function(mat, coords, rEmpt, prj){ 
+  df <- data.frame('var'=as.vector(mat))
+  pts <- SpatialPointsDataFrame(coords=coords, data=df)
   r <- rasterize(pts, rEmpt, 'var', fun=mean)
   r <- rotate(r)
   projection(r) <- prj
@@ -70,7 +69,7 @@ getRast <- function(iDp, vArry, coords, rEmpt, prj){
 # 25 minutes for 50 models, 2 variables
 pt1 <- proc.time()
 for (i in 1:length(idSbset)){
-  age <- ageSteps[i]
+  age <- sprintf("%03d", ageSteps[i])
   id <- idSbset[i]
   ann <- nc_open(paste0('Data/gcm_annual_mean/', id, 'o.pgclann_', age, '.nc'))
 
@@ -83,11 +82,12 @@ for (v in vars) {
   vAnn <- ncvar_get(ann, varid=v)
   expNm <- paste0('Data/gcm_annual_mean/', id, age, '_ann_', v, '.tif')
   if (v=='mixLyrDpth_ym_uo'){
-    r <- rEmpt
-    values(r) <- t(vAnn)
+    r <- getRast(mat=vAnn, coords=llGrid, rEmpt=rEmpt, prj=llPrj)
     writeRaster(r, nl=1, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
   } else {
-    rastL <- lapply(1:nDpths, getRast, vArry=vAnn, coords=llGrid, rEmpt=rEmpt, prj=llPrj)
+    rastL <- lapply(1:nDpths, function(x){
+      getRast(mat=vAnn[,,x], coords=llGrid, rEmpt=rEmpt, prj=llPrj)
+    } )
     vBrk <- brick(rastL)
     writeRaster(vBrk, nl=nDps, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
   }
@@ -108,7 +108,7 @@ moVect <- c('jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','d
 # 10 min for max values of 1 var in 50 models * 12 months
 pt1 <- proc.time()
 for (i in 1:length(idSbset)){
-  age <- ageSteps[i]
+  age <- sprintf("%03d", ageSteps[i])
   id <- idSbset[i]
   for (mo in moVect){
     rt <- 'https://www.paleo.bristol.ac.uk/ummodel/data/'
