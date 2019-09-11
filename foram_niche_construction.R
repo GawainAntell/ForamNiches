@@ -14,12 +14,9 @@ pkgs <- c('sp','raster')
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-
-#############################
 # Read in occurrence and environmental data
 
-occ <- read.csv('Data/foram_uniq_occs_latlong_8ka190905.csv', stringsAsFactors=FALSE)
-bins <- unique(occ$bin)
+source('Code/read_foram_data.R')
 
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
 envNms <- c('ann_otracer14_ym_dpth','ann_temp_ym_dpth',
@@ -48,43 +45,6 @@ getR <- function(bin, envNms){
 }
 modrnR <- getR(bin=bins[1], envNms=envNms)
 llPrj <- proj4string(modrnR[[1]])
-
-# Limit analysis to species included in tree from Aze et al. 2011
-trRaw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
-trRaw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', trRaw$Species.name)
-trRaw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', trRaw$Species.name)
-tr_paleo <- with(trRaw, 
-                 as.paleoPhylo(Species.code, Ancestor.code, Start.date, End.date)
-)
-tr <- buildApe(tr_paleo)
-sppCodes <- tr$tip.label
-rowOrdr <- match(sppCodes, trRaw$Species.code)
-tr$tip.label <- trRaw$Species.name[rowOrdr]
-
-# 8 species are not present in the phylogeny, mostly because microporiferate
-sppAll <- unique(occ$species)
-lostSpp <- setdiff(sppAll, tr$tip.label)
-
-# Beella megastoma is arguably the same species as B. digitata,
-# and Truncorotalia crassula is arguably senior synonym to crassaformis
-# (Schiebel and Hemleben 2017). The depth ranges for both are unknown.
-lostSpp <- c(lostSpp, 'Beella megastoma','Truncorotalia crassula')
-
-# Species must have > 5 occs in a bin to reconstruct niche with adequate precision
-spp <- vector()
-for (b in bins){
-  slcBool <- occ$bin==b
-  slcSpp <- occ$species[slcBool]
-  slcFreq <- table(slcSpp)
-  slcOk <- names( which(slcFreq > 5) )
-  spp <- union(spp, slcOk)
-}
-
-spp <- setdiff(spp, lostSpp)
-rows2toss <- ! occ$species %in% spp
-occ <- occ[!rows2toss,]
-
-row.names(occ) <- as.character(1:nrow(occ))
 
 #############################
 # Extract min, med, max values for each env axis/species/bin combo
