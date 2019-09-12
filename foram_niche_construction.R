@@ -132,6 +132,7 @@ getNiche <- function(sp, bin){
 }
 
 nich <- matrix(nrow=0,ncol=7)
+spp <- c(spp,'sampled')
 for (s in spp){
   for (b in bins){
     spBinNich <- getNiche(sp=s, bin=b)
