@@ -75,20 +75,12 @@ addEnv <- function(bin, dat, binCol, coordCols, cellCol, prj, envNms){
 
 # Fast enough (1 min) this could be done in a loop/lapply rather than parallel
 ncores <- detectCores() - 1
-pt1 <- proc.time()
 registerDoParallel(ncores)
-
 sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
   addEnv(bin=bin, envNms=envNms, dat=occ, binCol='bin', cellCol='cell_number',
            coordCols=c('pal.long','pal.lat'), prj=llPrj
            )
-
 stopImplicitCluster()
-pt2 <- proc.time()
-(pt2-pt1)/60
-
-flNm <- paste0('Data/foram_uniq_occs_latlong_8ka_wEnv_',day,'.csv')
-# write.csv(sppEnv, flNm)
 
 # Check for collinearity - all good
 # But if values taken at surface, water age is all 0
@@ -114,6 +106,9 @@ pcAxes <- paste0('pc', 1:length(envCols))
 sppEnv[,pcAxes] <- pcAll
 naRows <- is.na(pcAll[,1])
 sppEnv <- sppEnv[!naRows,]
+
+flNm <- paste0('Data/foram_uniq_occs_latlong_8ka_wEnv_',day,'.csv')
+# write.csv(sppEnv, flNm, row.names = FALSE)
 
 # Calculate center of mass and 90% hypervolume of each species' hypervolume
 # But only if > 5 occurrence for a given time bin
