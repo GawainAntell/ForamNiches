@@ -66,7 +66,7 @@ dispLong$resid <- lmDisp$residuals
 dispLong$dev <- dispLong$d - dispLong$sampled
 
 # The approaches yeild very similar results:
-cor(dispLong$dResid, dispLong$dev)
+cor(dispLong$resid, dispLong$dev)
 
 ####################################################################
 # Calculate niche overlap (Schoener's D) after Broennimann et al. 2012
@@ -144,6 +144,29 @@ colnames(dDf) <- spp
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 dfNm <- paste0('Data/foram_niche_overlap_D_',day,'.csv')
 write.csv(dDf, dfNm)
+
+# example plot
+sp <- 'Globigerina bulloides'
+b1 <- bins[1]
+b2 <- bins[2]
+glob <- pcDat[, c('pc1','pc2')]
+glob1bool <- pcDat$bin==b1
+glob1 <- glob[glob1bool,]
+glob2bool <- pcDat$bin==b2
+glob2 <- glob[glob2bool,]
+sp1rows <- which(pcDat$species==sp & pcDat$bin==b1)
+sp1 <- glob[sp1rows,]
+sp2rows <- which(pcDat$species==sp & pcDat$bin==b2)
+sp2 <- glob[sp2rows,]
+z1 <- ecospat.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0.05, th.env=0.05)
+z2 <- ecospat.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0.05, th.env=0.05)
+
+pNm <- paste0('Figs/G.bulloides_niche_heatmap', day, '.png')
+png(pNm, width=1040, height=696) 
+par(mfrow=c(1,2))
+plot(z1$z, main=paste(bins[1],'ka'), xlab='PC1', ylab='PC2') # raster of niche in PC space
+plot(z2$z, main=paste(bins[2],'ka'), xlab='PC1')
+dev.off()
 
 ####################################################################
 # Velocity of climate change
