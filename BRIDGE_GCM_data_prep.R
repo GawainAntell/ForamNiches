@@ -8,7 +8,7 @@ age <- c(0:23, seq(24, 800, by=4))
 
 # model IDs start with 'tei', plus one of [n, N, o] in every combination w a suffix
 dgt123 <- 'tei'
-dgt4 <- c('n','N','o','O')
+dgt4 <- c('t','T','u','U')
 dgt5 <- c(letters, LETTERS, 0:9)
 mods <- vector()
 for (dgt4i in dgt4){
@@ -19,10 +19,10 @@ for (dgt4i in dgt4){
 }
 mods <- head(mods, length(age))
 modMeta <- data.frame(id=mods, age_1000ka=age)
-# write.csv(modMeta, 'Data/gcm_model_codes.csv', row.names=FALSE)
+write.csv(modMeta, 'Data/gcm_model_codes.csv', row.names=FALSE)
 
 # spp data binned at 4 ky resolution, so use same for GCMs
-ageSteps <- seq(4, 800, by=4)
+ageSteps <- seq(0, 800, by=4)
 modSbset <- modMeta$age_1000ka %in% ageSteps
 idSbset <- as.character(modMeta$id[modSbset])
 
@@ -32,9 +32,15 @@ for (i in 1:length(idSbset)){
   id <- idSbset[i]
   rt <- 'https://www.paleo.bristol.ac.uk/ummodel/data/'
   adrs <- paste0(rt, id, '/climate/', id, 'o.pgclann.nc') 
-  dest <- paste0('Data/gcm_annual_mean/', id, 'o.pgclann_', age, '.nc')
+  dest <- paste0('Data/gcm_annual_mean/', id, '_', age, '_o.pgclann.nc')
   # Windows needs 'wb' argument to know that a binary transfer is necessary:
   temp <- download.file(adrs, dest, quiet=TRUE, mode='wb') 
+  
+  # Brunt-Vaisala is calculated upon request, not in the default nc file
+  # Only available to download after request for netcdf2 is made manually on BRIDGE analysis page
+  adrsBVF <- paste0(rt, id, '/new_plots/', id, '_ocean_brunt_vaisala_360_ann_owo1.nc')
+  destBVF <- paste0('Data/BruntVaisala/', id, '_', age, '_ocean_brunt_vaisala_360_ann_owo1.nc')
+  temp <- download.file(adrsBVF, destBVF, quiet=TRUE, mode='wb') 
 }
 
 # Extract data from each model and convert to raster brick 
@@ -44,8 +50,8 @@ vars <- c(# 'W_ym_dpth', # vertical motion
         #  'ucurrTot_ym_dpth', # W-E current
         #  'vcurrTot_ym_dpth', # N-S current
         #  'salinity_ym_dpth',
+        #  'otracer14_ym_dpth', # age of ocean water
           'temp_ym_dpth', # potential temperature
-          'otracer14_ym_dpth', # age of ocean water
           'mixLyrDpth_ym_uo' # 1-D mixed layer depth
           )
 
@@ -66,12 +72,12 @@ getRast <- function(mat, coords, rEmpt, prj){
   return(r)
 }
 
-# 25 minutes for 50 models, 2 variables
+# 67 minutes for 200 models, 3 variables
 pt1 <- proc.time()
 for (i in 1:length(idSbset)){
   age <- sprintf("%03d", ageSteps[i])
   id <- idSbset[i]
-  ann <- nc_open(paste0('Data/gcm_annual_mean/', id, 'o.pgclann_', age, '.nc'))
+  ann <- nc_open(paste0('Data/gcm_annual_mean/', id, '_', age,'_o.pgclann.nc'))
 
   dpths <- ann$dim$depth$vals
   nDpths <- length(dpths)
@@ -80,7 +86,7 @@ for (i in 1:length(idSbset)){
 # Include age in file name or models that differ only in captalization will overwrite
 for (v in vars) {
   vAnn <- ncvar_get(ann, varid=v)
-  expNm <- paste0('Data/gcm_annual_mean/', id, age, '_ann_', v, '.tif')
+  expNm <- paste0('Data/gcm_annual_mean/', id, '_', age, '_ann_', v, '.tif')
   if (v=='mixLyrDpth_ym_uo'){
     r <- getRast(mat=vAnn, coords=llGrid, rEmpt=rEmpt, prj=llPrj)
     writeRaster(r, nl=1, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
@@ -92,6 +98,13 @@ for (v in vars) {
     writeRaster(vBrk, nl=nDps, filename=expNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
   }
 }
+  
+  # Deal with BVF of the same model, from separate file
+  bvf <- nc_open(paste0('Data/BruntVaisala/', id, '_', age, '_ocean_brunt_vaisala_360_ann_owo1.nc'))
+  bvfDat <- ncvar_get(bvf)
+  bvfNm <- paste0('Data/BruntVaisala/', id, '_', age, '_ann_BVF360m.tif')
+  r <- getRast(mat=bvfDat, coords=llGrid, rEmpt=rEmpt, prj=llPrj)
+  writeRaster(r, nl=1, filename=bvfNm, format="GTiff", bylayer=FALSE, overwrite=TRUE)
 
 } # loop through models 
 pt2 <- proc.time()
@@ -120,6 +133,7 @@ for (i in 1:length(idSbset)){
   
   # Convert all months to (temporary) rasters
   # nc file to matrix to 1-column dataframe to spatialpoints to raster
+  # TODO adapt for 3D case of depth
   moFiles <- paste0('Data/gcm_monthly_mean/', id, 'o.pfcl', moVect, age, '.nc')
   moDat <- lapply(moFiles, nc_open)
   moM <- lapply(moDat, ncvar_get, varid='temp_mm_dpth')
@@ -134,7 +148,7 @@ for (i in 1:length(idSbset)){
   seasonal <- moMax - moMin
   seasonal <- rotate(seasonal)
   projection(seasonal) <- llPrj
-  ssnlNm <- paste0('Data/gcm_monthly_mean/', id, age, '_month_temp_range.tif')
+  ssnlNm <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_month_temp_range.tif')
   writeRaster(seasonal, filename=ssnlNm, format='GTiff', overwrite=TRUE)
 }
 pt2 <- proc.time()
