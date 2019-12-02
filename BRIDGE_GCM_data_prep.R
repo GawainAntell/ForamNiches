@@ -2,6 +2,7 @@ library(sp)
 library(raster)
 library(ncdf4)
 library(maptools)
+library(abind)
 
 # model age increment is 1ky for 0-24 ka, then 4 ky up to 800,000 ka
 age <- c(0:23, seq(24, 800, by=4))
@@ -118,7 +119,7 @@ pt2 <- proc.time()
 # Download monthly average .nc files
 moVect <- c('jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec')
 
-# 10 min for max values of 1 var in 50 models * 12 months
+# Runtime: 2.3 minutes/12 month model
 pt1 <- proc.time()
 for (i in 1:length(idSbset)){
   age <- sprintf("%03d", ageSteps[i])
@@ -126,30 +127,42 @@ for (i in 1:length(idSbset)){
   for (mo in moVect){
     rt <- 'https://www.paleo.bristol.ac.uk/ummodel/data/'
     adrs <- paste0(rt, id, '/climate/', id, 'o.pfcl', mo, '.nc') 
-    dest <- paste0('Data/gcm_monthly_mean/', id, 'o.pfcl', mo, age, '.nc')
+    dest <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_o.pfcl_', mo, '.nc')
     # Windows needs 'wb' argument to know that a binary transfer is necessary:
     temp <- download.file(adrs, dest, quiet=TRUE, mode='wb') 
   }
   
-  # Convert all months to (temporary) rasters
-  # nc file to matrix to 1-column dataframe to spatialpoints to raster
-  # TODO adapt for 3D case of depth
-  moFiles <- paste0('Data/gcm_monthly_mean/', id, 'o.pfcl', moVect, age, '.nc')
+  # Derive one raster brick (layers = months) per depth layer.
+  # Since monthly data are read in from separate files, merge into 4D array first
+  # then split anew by depth (instead of by month)
+  moFiles <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_o.pfcl_', moVect, '.nc')
   moDat <- lapply(moFiles, nc_open)
-  moM <- lapply(moDat, ncvar_get, varid='temp_mm_dpth')
-  moDf <- lapply(moM, function(x) data.frame('var'=as.vector(x)))
-  moPts <- lapply(moDf, SpatialPointsDataFrame, coords=llGrid)
-  moR <- lapply(moPts, rasterize, y=rEmpt, field='var', fun=mean)
-  moBrk <- brick(moR)
-
-  # Find the hotest/coldest values per cell
-  moMax <- max(moBrk)
-  moMin <- min(moBrk)
-  seasonal <- moMax - moMin
+  moArray <- lapply(moDat, ncvar_get, varid='temp_mm_dpth')
+  names(moArray) <- moVect
+  fullArray <- abind(moArray, along=4)
+  dpthDim <- dim(fullArray)[3]
+  # dimensions are: 1. long, 2. lat, 3. depth, 4. month
+  
+  # derive one raster brick (layers = months) per depth layer
+  moBrk <- apply(fullArray, 3, function(x){
+    # convert 3D array to list of dataframes, 1 per depth
+    dpthDf <- apply(x, 3, function(y) data.frame('var'=as.vector(y)))
+    moPts <- lapply(dpthDf, SpatialPointsDataFrame, coords=llGrid)
+    moR <- lapply(moPts, rasterize, y=rEmpt, field='var', fun=mean)
+    brick(moR)
+  }) 
+  
+  # Find the hotest/coldest values per cell, per depth layer
+  # R bug? must specify the function or it will not be interpreted
+  moMax <- lapply(moBrk, function(x) max(x))
+  moMin <- lapply(moBrk, function(x) min(x))
+  seasonal <- brick(moMax) - brick(moMin)
   seasonal <- rotate(seasonal)
-  projection(seasonal) <- llPrj
+#  projection(seasonal) <- llPrj # redundant
   ssnlNm <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_month_temp_range.tif')
-  writeRaster(seasonal, filename=ssnlNm, format='GTiff', overwrite=TRUE)
+  writeRaster(seasonal, nl=dpthDim, filename=ssnlNm, format='GTiff', overwrite=TRUE)
+  maxNm <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_month_temp_max.tif')
+  writeRaster(brick(moMax), nl=dpthDim, filename=maxNm, format='GTiff', overwrite=TRUE)
 }
 pt2 <- proc.time()
 (pt2-pt1)/60
