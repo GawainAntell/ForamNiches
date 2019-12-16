@@ -1,83 +1,17 @@
-# TODO: instead of calculating deviation on 1st differences,
-# calculate deviation on standing values. Save this info - for evo mode analysis. 
-# Then calculate differences of deviations, which is the same as deviations of diffs. 
 library(tidyr)
 library(lme4)
 library(ecospat)
 library(VoCC)
 #devtools::install_github("JorGarMol/VoCC", dependencies = FALSE, build_vignettes = FALSE)
 
-dat <- read.csv('Data/foram_niche_data_8ky_190912.csv',stringsAsFactors=FALSE)
-bins <- unique(dat$bin)
-
+pcDat <- read.csv('Data/foram_uniq_occs_latlong_8ka_wEnv_190919.csv',stringsAsFactors=FALSE)
+pcDat <- pcDat[,c('species','bin','cell_number','centroid_long','centroid_lat','pc1','pc2','pc3')]
+bins <- unique(pcDat$bin)
+spp <- unique(pcDat$species)
 # for theyeri and adamsi, niche is quantified in only 1 time bin
 # conglomeratea and dehiscens occur in only 1 set of consecutive bins
 # humilis occurs in 2 sets of consecutive bins
 # Globorotalia ungulata doesn't seem to have >5 occs in any bin
-noGood <- c('Hirsutella theyeri','Globigerinella adamsi',
-            'Globoquadrina conglomerata','Sphaeroidinella dehiscens',
-            'Globorotalia ungulata','Turborotalita humilis')
-toss <- which(dat$species %in% noGood)
-dat <- dat[-toss,]
-
-spp <- unique(dat$species)
-
-# calculate displacement for species through time
-coords <- dat[,c('pc1_centroid','pc2_centroid','pc3_centroid')]
-displace <- function(s){
-  spBool <- dat$species==s
-  spCoords <- coords[spBool,]
-  spSteps <- dat$bin[spBool]
-  d <- dist(spCoords)
-  # diagonal is all zeroes; remove top row to get dist btwn adjacent pts
-  m <- as.matrix(d)[-1,]
-  pairDisp <- c(diag(m),NA)
-  
-  # Don't calculate distance over gaps in time series
-  gap <- diff(spSteps)!=8
-  pairDisp[gap] <- NA
-  
-  cbind(species=s, bin=spSteps, d=pairDisp)
-}
-dispL <- lapply(spp, displace)
-dispDf <- as.data.frame(do.call(rbind,dispL))
-dispDf <- na.omit(dispDf)
-# Note that the difference is labelled by the later of the 2 bins
-# e.g. bin = 4 for the difference from 12 to 4 ka
-
-# Compare per-species and sampled niche space:
-# for niche volume and niche centroid displacement
-
-# Split out sampled niche space into a separate column 
-# to be response variable in regression
-dispWide <- spread(dispDf, key=species, value=d, convert=TRUE)
-cols2merge <- setdiff(spp, 'sampled')
-dispLong <- gather(dispWide, key=species, value=d, cols2merge)
-dispLong <- na.omit(dispLong)
-
-# save lm residuals for analysis
-# (not MEM residuals bc interspecific differences should be kept)
-lmDisp <- lm(d ~ sampled, data=dispLong)
-dispLong$resid <- lmDisp$residuals
-
-# Alternative approach: direct difference between species and sampled series
-# Note that it's equivalent to do: diff(sp - samp) vs. diff(sp) - diff(sampl)
-# This is similar to Reddin et al.'s 2018 deviation calculations
-dispLong$dev <- dispLong$d - dispLong$sampled
-
-# The approaches yeild very similar results:
-cor(dispLong$resid, dispLong$dev)
-
-####################################################################
-# Calculate niche overlap (Schoener's D) after Broennimann et al. 2012
-# PCA-occ method
-
-pcDat <- read.csv('Data/foram_uniq_occs_latlong_8ka_wEnv_190919.csv',stringsAsFactors=FALSE)
-pcDat <- pcDat[,c('species','bin','cell_number','centroid_long','centroid_lat','pc1','pc2','pc3')]
-
-# if skipping to this section without running the sections above:
-bins <- unique(pcDat$bin)
-spp <- unique(pcDat$species)
 noGood <- c('Hirsutella theyeri','Globigerinella adamsi',
             'Globoquadrina conglomerata','Sphaeroidinella dehiscens',
             'Globorotalia ungulata','Turborotalita humilis')
@@ -100,6 +34,8 @@ pcDat <- pcDat[keepRows,]
   
 # Resolution of the gridding of the climate space
 R <- 100
+
+# Calculate niche overlap (Schoener's D) after Broennimann et al. 2012, PCA-occ method
 
 overlapD <- function(b1, b2, sp){
   glob <- pcDat[, c('pc1','pc2')]
