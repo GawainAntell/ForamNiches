@@ -6,11 +6,12 @@ library(iterators)
 library(doParallel)
 
 tRes <- 8
+day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
 # Read in occurrence data
-occ <- read.csv('Data/Foram_data_800ka_IF190709.csv', stringsAsFactors = FALSE)
+occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 
-# easier to work on scale of data: ka not ma
+# easier to work on scale of ka not ma
 occ$age <- occ$age*1000
 
 # remove T. cavernula and excelsa, which originated <800 ka
@@ -20,18 +21,20 @@ occ <- occ[-tooYng,]
 # excise sp traits into a separate, sp-level file to call later in analysis
 traits <- c('morphDes','spinose','structure','aperture','latest','earliest',
             'mph','mphRef','eco','ecoRef','geo','geoRef',
-            'Average.Area.microm2','log.area','Approximate.diameter')
+            'log.area','Approximate.diameter') # 'Average.Area.microm2',
 sppDat <- occ[,c('species',traits)]
 dupes <- duplicated(sppDat$species)
 sppDat <- sppDat[!dupes,]
 
 ##########################################
 # add modern depth ranges to sp-level file, for species in both datasets
+# TODO check if there are any species in the 'final' output that still need depth data
 
 # Read in modern depth ranges: Rebotim et al 2017, table 4
 dpthTbl <- read.table('Data/Rebotim_et_al_depth_ranges.txt',
                       header=TRUE, stringsAsFactors=FALSE)
 abund <- dpthTbl$MaxAbund
+# remove single-letter code that follows the numeric abund value
 penult <- nchar(abund) - 1
 dpthTbl$MaxAbund <- substr(abund, 1, penult)
 dpthTbl$MaxAbund <- as.numeric(dpthTbl$MaxAbund)
@@ -124,7 +127,8 @@ newCols <- colnames(dpthTbl)[-1]
 sppDat[,newCols] <- NA
 spPos <- match(dpthTbl$Species, spp)
 sppDat[spPos,newCols] <- dpthTbl[,-1]
-# write.csv(sppDat, 'Data/foram_spp_data.csv', row.names = FALSE)
+spDatNm <- paste0('Data/foram_spp_data_',day,'.csv')
+write.csv(sppDat, spDatNm, row.names = FALSE)
 
 # cut down file size
 irrel <- c('site','hole','core','section','sample.top','sample.type',
@@ -133,7 +137,7 @@ cols2toss <- colnames(occ) %in% c(traits, irrel)
 occ <- occ[,!cols2toss]
 
 ##########################################################
-# bin to 4 ky intervals to match GCM data
+# bin to time intervals to match GCM data
 
 brk <- seq(0, 800-tRes, by=tRes)
 bins <- data.frame(t=brk, b=brk+tRes, mid=brk+tRes/2)
@@ -164,47 +168,57 @@ occ$centroid_lat <- occ$centroid_long <- NA
 occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
 
 # remove records with imprecise age estimates
-unconstrnd <- which(occ$age.model %in% c('Berggren1977','Ericson1968','GTSBlow1969'))
+# ~13% of occurrences
+ageMods <- c('Berggren1977','Ericson1968','GTSBlow1969','Raffi2006')
+unconstrnd <- union(which(occ$age.model %in% ageMods), 
+                    which(occ$rng.age > tRes/1000))
 occ <- occ[-unconstrnd,]
-
-# remove species too rare to reconstruct niches
-nmFreq <- table(occ$species)
-rare <- names( which(nmFreq <6) )
-occ <- occ[! occ$species %in% rare,]
 
 spp <- unique(occ$species)
 
-# subset by stage, then species, then find unique species-cells combinations
+# subset by bin, then species, then find unique species-cells combinations
 
 # omit duplicate cell-species combinations
-st_sp_summary <- function(dat, sp){
-  sp_st <- dat[dat$species==sp,] 
-  uniq_record <- function(x){ 
-    first <- which(sp_st$cell_number==x)[1]
-    sp_st[first,] 
+slcSpSmry <- function(dat, sp){
+  spSlc <- dat[dat$species==sp,] 
+  uniqRecord <- function(x){ 
+    first <- which(spSlc$cell_number==x)[1]
+    spSlc[first,] 
   }
-  temp_list <- lapply(unique(sp_st$cell_number), uniq_record)
-  do.call('rbind', temp_list)
+  tempList <- lapply(unique(spSlc$cell_number), uniqRecord)
+  do.call('rbind', tempList)
 }
 
-# apply st_sp_summary over species in a stage
-st_summary <- function(dat, bin){
+# apply slcSpSmry over species in a stage
+slcSmry <- function(dat, bin){
   slc <- dat[dat$bin==bin,]
-  temp_list <- lapply(unique(slc$species), st_sp_summary, dat=slc)
-  do.call('rbind', temp_list)
+  tempList <- lapply(unique(slc$species), slcSpSmry, dat=slc)
+  do.call('rbind', tempList)
 }
 
 nCore <- detectCores() - 1
 pt1 <- proc.time()
 registerDoParallel(nCore)
-stage_dat_list <- foreach(bin=bins$mid) %dopar% st_summary(bin=bin, dat=occ)
+stageDfList <- foreach(bin=bins$mid) %dopar% slcSmry(bin=bin, dat=occ)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
 
-fin <- do.call('rbind', stage_dat_list)
+fin <- do.call('rbind', stageDfList)
 
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
-df_name <- paste('Data/foram_uniq_occs_latlong_',tRes, 'ka', day, '.csv', sep='')
-write.csv(fin, file=df_name, row.names=FALSE)
+# Subset occurrences such that eas sp has >5 occs per bin
+saveRows <- function(sp, bin, df){
+  spRows <- which(df$species==sp & df$bin==bin)
+  if (length(spRows)>5){
+    spRows
+  }
+}  
+keepRowsL <- sapply(spp, function(x){
+  sapply(bins$mid, function(b) saveRows(sp=x, bin=b, df=fin))
+} 
+)
+keepRows <- unlist(keepRowsL)
+fin <- fin[keepRows,]
 
+dfNm <- paste('Data/foram_uniq_occs_latlong_',tRes, 'ka_', day, '.csv', sep='')
+write.csv(fin, file=dfNm, row.names=FALSE)
