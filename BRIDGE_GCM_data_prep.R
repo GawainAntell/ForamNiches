@@ -156,13 +156,16 @@ for (i in 1:length(idSbset)){
   # R bug? must specify the function or it will not be interpreted
   moMax <- lapply(moBrk, function(x) max(x))
   moMin <- lapply(moBrk, function(x) min(x))
-  seasonal <- brick(moMax) - brick(moMin)
-  seasonal <- rotate(seasonal)
+  moMax <- rotate(brick(moMax))
+  moMin <- rotate(brick(moMin))
+  seasonal <- moMax - moMin
 #  projection(seasonal) <- llPrj # redundant
   ssnlNm <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_month_temp_range.tif')
   writeRaster(seasonal, nl=dpthDim, filename=ssnlNm, format='GTiff', overwrite=TRUE)
   maxNm <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_month_temp_max.tif')
-  writeRaster(brick(moMax), nl=dpthDim, filename=maxNm, format='GTiff', overwrite=TRUE)
+  writeRaster(moMax, nl=dpthDim, filename=maxNm, format='GTiff', overwrite=TRUE)
+  minNm <- paste0('Data/gcm_monthly_mean/', id, '_', age, '_month_temp_min.tif')
+  writeRaster(moMin, nl=dpthDim, filename=minNm, format='GTiff', overwrite=TRUE)
 }
 pt2 <- proc.time()
 (pt2-pt1)/60
