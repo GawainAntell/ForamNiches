@@ -2,7 +2,7 @@ library(phytools)
 library(paleoPhylo)
 library(ape)
 
-occ <- read.csv('Data/foram_uniq_occs_latlong_8ka190905.csv', stringsAsFactors=FALSE)
+occ <- read.csv('Data/foram_uniq_occs_latlong_8ka_191218.csv', stringsAsFactors=FALSE)
 bins <- unique(occ$bin)
 
 # Limit analysis to species included in tree from Aze et al. 2011
@@ -17,7 +17,7 @@ sppCodes <- tr$tip.label
 rowOrdr <- match(sppCodes, trRaw$Species.code)
 tr$tip.label <- trRaw$Species.name[rowOrdr]
 
-# 8 species are not present in the phylogeny, mostly because microporiferate
+# 10 species are not present in the phylogeny, mostly because microporiferate
 sppAll <- unique(occ$species)
 lostSpp <- setdiff(sppAll, tr$tip.label)
 
@@ -26,18 +26,7 @@ lostSpp <- setdiff(sppAll, tr$tip.label)
 # (Schiebel and Hemleben 2017). The depth ranges for both are unknown.
 lostSpp <- c(lostSpp, 'Beella megastoma', 'Truncorotalia crassula')
 
-# Species must have > 5 occs in a bin to reconstruct niche with adequate precision
-spp <- vector()
-for (b in bins){
-  slcBool <- occ$bin==b
-  slcSpp <- occ$species[slcBool]
-  slcFreq <- table(slcSpp)
-  slcOk <- names( which(slcFreq > 5) )
-  spp <- union(spp, slcOk)
-}
-
-spp <- setdiff(spp, lostSpp)
+spp <- setdiff(sppAll, lostSpp)
 rows2toss <- ! occ$species %in% spp
 occ <- occ[!rows2toss,]
-
 row.names(occ) <- as.character(1:nrow(occ))
