@@ -87,7 +87,7 @@ envCols <- paste0(envNms,'_surface')
 smpldEnv <- smpld[,envCols]
 smpldEnv <- na.omit(smpldEnv)
 cor(smpldEnv)
-# mean annual temp and max monthly temp are nearly perfectly colinear
+# mean annual temp and min and max monthly temp are nearly perfectly colinear
 
 # Retrieve eigenvalues for PC rotation of sampled environment.
 # Axis 1 ~ mean/max temperature. Axis 2 ~ seasonal temperature range
@@ -106,6 +106,23 @@ pcAxes <- paste0('pc', 1:length(envCols))
 sppEnv[,pcAxes] <- pcAll
 naRows <- is.na(pcAll[,1])
 sppEnv <- sppEnv[!naRows,]
+
+# again remove species for which <6 occs are found
+# Subset occurrences such that eas sp has >5 occs per bin
+tooRare <- function(sp, bin, df){
+  spRows <- which(df$species==sp & df$bin==bin)
+  if (length(spRows)<6){
+    spRows
+  }
+}  
+tossRowsL <- 
+  sapply(spp, function(x){
+    sapply(bins, function(b){
+      tooRare(sp=x, bin=b, df=sppEnv)
+    } )
+  } )
+tossRows <- unlist(tossRowsL)
+sppEnv <- sppEnv[-tossRows,]
 
 outNm <- paste0('Data/foram_uniq_occs_latlong_8ka_wEnv_',day,'.csv')
 write.csv(sppEnv, outNm, row.names = FALSE)
