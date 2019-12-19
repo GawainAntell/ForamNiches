@@ -4,13 +4,45 @@ library(raster)
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-occ <- read.csv('Data/foram_uniq_occs_latlong_8ka_wEnv_190919.csv', stringsAsFactors=FALSE)
+occ <- read.csv('Data/foram_uniq_occs_latlong_8ka_wEnv_191219.csv', stringsAsFactors=FALSE)
 bins <- unique(occ$bin) #seq(4, 796, by=8)
 
-# split data into present-day (last 16ky) vs. older
-modrn_rows <- occ$bin==bins[1]
+# split data into present-day (last 16 ka) vs. older
+modrn_rows <- occ$bin %in% bins[1:2]
 modrn <- occ[modrn_rows,]
 old <- occ[!modrn_rows,]
+
+# per-species sample size through time
+# boxplot of n occs per species, at each time bin
+
+sppN <- function(df,b){
+  bBool <- df$bin==b
+  bDf <- df[bBool,]
+  nmTbl <- table(bDf$species)
+  spp <- names(nmTbl)
+  n <- as.numeric(nmTbl)
+  cbind(n=n, t=b)
+}
+nDat <- sapply(bins[-(1:2)], sppN, df=old)
+nDf <- data.frame(do.call(rbind, nDat))
+nDf$t <- factor(-nDf$t)
+
+xlab <- rev(bins[-(1:2)])
+bp <- ggplot(data=nDf, aes(x=t, y=n)) +
+  geom_hline(yintercept=10, colour='blue')+
+  geom_boxplot(width=0.65) +
+  scale_y_continuous(name='occurrences per species') +
+  scale_x_discrete(name='ka', labels=xlab) +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, size=8)
+        #      panel.grid.major = element_line(size = 0.5, linetype = 'solid', 
+        #                                      colour = "white")
+  )
+
+bpNm <- paste0('Figs/n_per_sp_8ky_', day, '.pdf')
+pdf(bpNm, width=9, height=5)
+bp
+dev.off()
+
 
 # number of species (total or >5 occs) vs. time: line plot
 
