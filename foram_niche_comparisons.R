@@ -1,75 +1,77 @@
-library(tidyr)
+#library(tidyr)
 library(lme4)
 library(adehabitatMA)
 library(adehabitatHR)
 library(ecospat)
-library(VoCC)
+#library(VoCC)
 #devtools::install_github("JorGarMol/VoCC", dependencies = FALSE, build_vignettes = FALSE)
-source('ecospat.grid.clim.dyn.GSA_fcn.R')
+source('ecospat.grid.clim.dyn.GSA.fcn.R')
 
-pcDat <- read.csv('Data/foram_uniq_occs_latlong_8ka_wEnv_190919.csv',stringsAsFactors=FALSE)
-pcDat <- pcDat[,c('species','bin','cell_number','centroid_long','centroid_lat','pc1','pc2','pc3')]
-bins <- unique(pcDat$bin)
+df <- read.csv('Data/foram_uniq_occs_latlong_8ka_MeanAnnT_191226.csv',stringsAsFactors=FALSE)
+df <- df[,c('species','bin','cell_number','centroid_long','centroid_lat','ann_temp_ym_dpth_surface')]
+bins <- unique(df$bin)
 nbins <- length(bins)
-spp <- unique(pcDat$species)
+spp <- unique(df$species)
 # for theyeri and adamsi, niche is quantified in only 1 time bin
 # conglomeratea and dehiscens occur in only 1 set of consecutive bins
 # humilis occurs in 2 sets of consecutive bins
 # Globorotalia ungulata doesn't seem to have >5 occs in any bin
+#TODO re-evaluate this list following IF's data addition
 noGood <- c('Hirsutella theyeri','Globigerinella adamsi',
             'Globoquadrina conglomerata','Sphaeroidinella dehiscens',
             'Globorotalia ungulata','Turborotalita humilis')
-toss <- which(spp %in% noGood)
-spp <- spp[-toss]
+  #toss <- which(spp %in% noGood)
+  #spp <- spp[-toss]
+  #keep <- df$species %in% spp
+  #df <- df[keep,]
 
-# Subset occurrences such that eas sp has >5 occs per bin
-saveRows <- function(sp, bin){
-  spRows <- which(pcDat$species==sp & pcDat$bin==bin)
-  if (length(spRows)>5){
-    spRows
-  }
-}  
-keepRowsL <- sapply(spp, function(x){
-  sapply(bins, function(b)saveRows(sp=x, bin=b))
-} 
-)
-keepRows <- unlist(keepRowsL)
-pcDat <- pcDat[keepRows,]
-
+env <- 'ann_temp_ym_dpth_surface'
+h.methods <- c("nrd0","ucv","SJ-ste")
 # Resolution of the gridding of the climate space
 R <- 100
 
 # Calculate niche overlap (Schoener's D) after Broennimann et al. 2012, PCA-occ method
-
-overlapD <- function(b1, b2, sp){
-  glob <- pcDat[, c('pc1','pc2')]
-  glob1bool <- pcDat$bin==b1
-  glob1 <- glob[glob1bool,]
-  glob2bool <- pcDat$bin==b2
-  glob2 <- glob[glob2bool,]
-  sp1rows <- which(pcDat$species==sp & pcDat$bin==b1)
-  sp1 <- glob[sp1rows,]
-  sp2rows <- which(pcDat$species==sp & pcDat$bin==b2)
-  sp2 <- glob[sp2rows,]
+overlapD <- function(b1, b2, sp, env, h.method){
+  if (ncol(glob) > 1) {stop("cannot calculate overlap with more than one axis")}
+  
+  globBool <- df$species=='sampled'
+  glob <- df[globBool,env]
+  glob <- as.matrix(glob)
+  
+  glob1rows <- which(df$species=='sampled' & df$bin==b1)
+  glob1 <- df[glob1rows,env]
+  glob1 <- as.matrix(glob1)
+  
+  glob2rows <- which(df$species=='sampled' & df$bin==b2)
+  glob2 <- df[glob2rows,env]
+  glob2 <- as.matrix(glob2)
+  
+  sp1rows <- which(df$species==spNm & df$bin==b1)
+  sp1 <- df[sp1rows,env]
+  sp <- as.matrix(sp1)
+  
+  sp2rows <- which(df$species==spNm & df$bin==b2)
+  sp2 <- df[sp2rows,env]
+  sp2 <- as.matrix(sp2)
   
   # for each species at time i and i+1
   z1 <- tryCatch(
-    ecospat.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0.05),
+    GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0.05, th.env=0.05, h.method=h.method),
     error = function(err){ NA }
   ) 
   z2 <- tryCatch(
-    ecospat.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0, th.env=0.05),
+    GSA.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0.05, th.env=0.05, h.method=h.method),
     error = function(err){ NA }
   ) 
-  # plot(z1$z) # raster of niche in PC space
-  
+
   if (any(is.na(list(z1, z2)))){
     NA
   } else {
-    ovrlp <- ecospat.niche.overlap(z1, z2, cor=FALSE)
+    ovrlp <- ecospat.niche.overlap(z1, z2, cor=TRUE)
     ovrlp$D
   }
 }
+#overlapD(4, 12, 'Beella digitata', env, 'nrd0')
 
 bPairs <- cbind(bins[-1], bins[-length(bins)])
 Dlist <- lapply(spp, function(s){
@@ -96,8 +98,8 @@ binL <- bins[2]-bins[1]
 for (pt in focalPts){
   b1 <- pt + binL
   b2 <- pt
-  slcBool <- pcDat$bin %in% c(b1, b2)
-  slc <- pcDat[slcBool,]
+  slcBool <- df$bin %in% c(b1, b2)
+  slc <- df[slcBool,]
   glob <- slc[, c('pc1','pc2')]
   glob1bool <- slc$bin==b1
   glob1 <- glob[glob1bool,]
@@ -165,20 +167,20 @@ for (sp in c(rare, abund)){
   sp2h <- getH(sp2dens, spr2)
   
   # Subjective bandwidth
-  z1 <- ecospat.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0.05)
-  z2 <- ecospat.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0, th.env=0.05)
-  ovrlp <- ecospat.niche.overlap(z1, z2, cor=FALSE)
+  z1 <- ecospat.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0.05, th.env=0.05)
+  z2 <- ecospat.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0.05, th.env=0.05)
+  ovrlp <- ecospat.niche.overlap(z1, z2, cor=TRUE)
   d <- ovrlp$D 
   maxY <- max(z1$y)*0.8
   
   # Least-squares cross-validation bandwidth
   z1lscv <- suppressWarnings(
-    ecospat.grid.clim.dyn.GSA(glob, glob1, sp1, R, th.sp=0, th.env=0.05)
+    ecospat.grid.clim.dyn.GSA(glob, glob1, sp1, R, th.sp=0.05, th.env=0.05)
   )
   z2lscv <- suppressWarnings(
-    ecospat.grid.clim.dyn.GSA(glob, glob2, sp2, R, th.sp=0, th.env=0.05)
+    ecospat.grid.clim.dyn.GSA(glob, glob2, sp2, R, th.sp=0.05, th.env=0.05)
   )
-  ovrlpLscv <- ecospat.niche.overlap(z1lscv, z2lscv, cor=FALSE)
+  ovrlpLscv <- ecospat.niche.overlap(z1lscv, z2lscv, cor=TRUE)
   dLscv <- ovrlpLscv$D 
   maxYlscv <- max(z1lscv$y)*0.8
   
