@@ -179,5 +179,9 @@ for (s in spp){
 keepBool <- trunc$species %in% keepSpp
 trunc <- trunc[keepBool,]
 
+# note: no remaining observations at 740 ka!
+diff(sort(bins))
+trim <- trunc$bin < 740
+trimmd <- trunc[trim,]
 outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
 write.csv(trunc, outNm, row.names = FALSE)
