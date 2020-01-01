@@ -5,6 +5,9 @@ library(foreach)
 library(iterators)
 library(doParallel)
 library(PBSmapping)
+library(ggplot2)
+
+# Data import -------------------------------------------------------------
 
 # save names to put packages on all cores later
 pkgs <- c('sp','raster') 
@@ -26,6 +29,8 @@ envNm <- c('ann_temp_ym_dpth'
              )
 # Note: envNm can be a vector
 llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+# Combine enviro and spp data ---------------------------------------------
 
 getBrik <- function(bin, envNm){
   modRow <- modId$age_1000ka == bin
@@ -78,6 +83,8 @@ sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dop
   addEnv(bin=bin,envNm=envNm,dat=occ,binCol='bin',cellCol='cell_number',prj=llPrj)
 stopImplicitCluster()
 
+# * Clean -----------------------------------------------------------------
+
 # remove records where environment is unknown
 envCol <- grep(envNm, colnames(sppEnv))
 if (length(envCol)==1){
@@ -89,8 +96,54 @@ if (length(envCol)==1){
 }
 sppEnv <- sppEnv[!naRows,]
 
-# The last step could introduce more species with <6 occs
-# Subset again such that eas sp has >5 occs per bin
+df <- sppEnv[,c('species','bin','cell_number','centroid_long','centroid_lat','ann_temp_ym_dpth_surface')]
+colnames(df)[ncol(df)] <- 'mat'
+
+# Truncate to standard temp range -----------------------------------------
+
+minmax <- function(df, b, env){
+  bBool <- df[,'bin']==b
+  slc <- df[bBool,]
+  mn <- min(slc[,env])
+  max <- max(slc[,env])
+  c(b, mn, max)
+}
+sampSmryM <- sapply(bins, minmax, df=df, env='mat')
+sampSmry <- data.frame(t(sampSmryM))
+colnames(sampSmry) <- c('bin','min','max')
+uppr <- min(sampSmry$max)
+lwr <- max(sampSmry$min)
+
+p <- ggplot(data=sampSmry) + theme_bw() +
+  scale_x_continuous(name='Time (ka)', expand=c(0.01,0)) +
+  scale_y_continuous(name = 'MAT (degrees C)') +
+  geom_linerange(aes(x=-bin, ymin=min, ymax=max)) +
+  geom_hline(yintercept=uppr, colour='blue', lwd=1) +
+  geom_hline(yintercept=lwr, colour='blue', lwd=1)
+
+pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
+pdf(pNm, width = 6, height=4)
+p
+dev.off()
+
+trunc <- data.frame()
+for (b in bins){
+  bBool <- df$bin==b
+  slc <- df[bBool,]
+  tooBig <- which(slc$mat > uppr)
+  tooSmol <- which(slc$mat < lwr)
+  out <- c(tooBig, tooSmol)
+  slc <- slc[-out,]
+  trunc <- rbind(trunc, slc)
+}
+
+# inspect the proportion of observations remaining
+nrow(trunc)/nrow(df)
+
+# * Clean -----------------------------------------------------------------
+
+# The last steps could introduce species with <6 occs.
+# Subset again such that each sp has >5 occs per bin.
 tooRare <- function(sp, bin, df){
   spRows <- which(df$species==sp & df$bin==bin)
   if (length(spRows)<6){
@@ -100,11 +153,31 @@ tooRare <- function(sp, bin, df){
 tossRowsL <- 
   sapply(spp, function(x){
     sapply(bins, function(b){
-      tooRare(sp=x, bin=b, df=sppEnv)
+      tooRare(sp=x, bin=b, df=trunc)
     } )
   } )
 tossRows <- unlist(tossRowsL)
-sppEnv <- sppEnv[-tossRows,]
+trunc <- trunc[-tossRows,]
 
-outNm <- paste0('Data/foram_uniq_occs_latlong_8ka_MeanAnnT_',day,'.csv')
-write.csv(sppEnv, outNm, row.names = FALSE)
+# Also check for per-species continuity through time (at least 6 successive steps of 8ka)
+keepSpp <- character()
+binL <- bins[2] - bins[1]
+enuf <- rep(binL, 6)
+enufTxt <- paste0(enuf, collapse='')
+spp <- unique(trunc$species)
+for (s in spp){
+  spBool <- trunc$species==s
+  spDf <- trunc[spBool,]
+  spB <- sort(unique(spDf$bin))
+  bDiff <- diff(spB)
+  diffTxt <- paste0(bDiff, collapse='')
+  srch <- grep(enufTxt,diffTxt)
+  if (length(srch) > 0){
+    keepSpp <- c(keepSpp, s)
+  }
+}
+keepBool <- trunc$species %in% keepSpp
+trunc <- trunc[keepBool,]
+
+outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
+write.csv(trunc, outNm, row.names = FALSE)
