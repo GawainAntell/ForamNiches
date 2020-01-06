@@ -7,85 +7,70 @@ library(ecospat)
 #devtools::install_github("JorGarMol/VoCC", dependencies = FALSE, build_vignettes = FALSE)
 source('ecospat.grid.clim.dyn.GSA.fcn.R')
 
-df <- read.csv('Data/foram_uniq_occs_latlong_8ka_MeanAnnT_191226.csv',stringsAsFactors=FALSE)
-df <- df[,c('species','bin','cell_number','centroid_long','centroid_lat','ann_temp_ym_dpth_surface')]
+df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200103.csv',stringsAsFactors=FALSE)
 bins <- unique(df$bin)
 nbins <- length(bins)
 spp <- unique(df$species)
-# for theyeri and adamsi, niche is quantified in only 1 time bin
-# conglomeratea and dehiscens occur in only 1 set of consecutive bins
-# humilis occurs in 2 sets of consecutive bins
-# Globorotalia ungulata doesn't seem to have >5 occs in any bin
-#TODO re-evaluate this list following IF's data addition
-noGood <- c('Hirsutella theyeri','Globigerinella adamsi',
-            'Globoquadrina conglomerata','Sphaeroidinella dehiscens',
-            'Globorotalia ungulata','Turborotalita humilis')
-  #toss <- which(spp %in% noGood)
-  #spp <- spp[-toss]
-  #keep <- df$species %in% spp
-  #df <- df[keep,]
 
-env <- 'ann_temp_ym_dpth_surface'
-h.methods <- c("nrd0","ucv","SJ-ste")
-# Resolution of the gridding of the climate space
-R <- 100
+env <- 'mat'
+h.method <- c("nrd0","ucv","SJ-ste")[1]
+# Resolution of the gridding of the climate space. Ecospat default is 100.
+R <- 1000
 
-# Calculate niche overlap (Schoener's D) after Broennimann et al. 2012, PCA-occ method
-overlapD <- function(b1, b2, sp, env, h.method){
-  if (ncol(glob) > 1) {stop("cannot calculate overlap with more than one axis")}
-  
+# Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
+nicher <- function(b1, b2, sp, env, h.method){
+
   globBool <- df$species=='sampled'
   glob <- df[globBool,env]
-  glob <- as.matrix(glob)
-  
+
   glob1rows <- which(df$species=='sampled' & df$bin==b1)
   glob1 <- df[glob1rows,env]
-  glob1 <- as.matrix(glob1)
-  
+
   glob2rows <- which(df$species=='sampled' & df$bin==b2)
   glob2 <- df[glob2rows,env]
-  glob2 <- as.matrix(glob2)
-  
-  sp1rows <- which(df$species==spNm & df$bin==b1)
+
+  sp1rows <- which(df$species==sp & df$bin==b1)
   sp1 <- df[sp1rows,env]
-  sp <- as.matrix(sp1)
-  
-  sp2rows <- which(df$species==spNm & df$bin==b2)
+
+  sp2rows <- which(df$species==sp & df$bin==b2)
   sp2 <- df[sp2rows,env]
-  sp2 <- as.matrix(sp2)
-  
+
   # for each species at time i and i+1
   z1 <- tryCatch(
-    GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0.05, th.env=0.05, h.method=h.method),
-    error = function(err){ NA }
+    GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0, h.method=h.method),
+    error = function(err){ list() }
   ) 
   z2 <- tryCatch(
-    GSA.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0.05, th.env=0.05, h.method=h.method),
-    error = function(err){ NA }
+    GSA.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0, th.env=0, h.method=h.method),
+    error = function(err){ list() }
   ) 
 
-  if (any(is.na(list(z1, z2)))){
-    NA
+  # the species may be absent in one or both bins, in which z1|2 is an empty vector
+  if (length(z1)==0){
+    data.frame(bin=NA, sp=NA, d=NA, pa=NA, pe=NA, tol=NA)
   } else {
-    ovrlp <- ecospat.niche.overlap(z1, z2, cor=TRUE)
-    ovrlp$D
+    if (length(z2)==0){
+      data.frame(bin=b1, sp=sp, d=NA, pa=z1$pa, pe=z1$pe, tol=z1$t)
+    } else{
+      ovrlp <- GSA.ecospat.niche.overlap(z1, z2, cor=FALSE)
+      data.frame(bin=b1, sp=sp, d=ovrlp$D, pa=z1$pa, pe=z1$pe, tol=z1$t)
+    }
   }
 }
-#overlapD(4, 12, 'Beella digitata', env, 'nrd0')
 
+# the older bin is column 1, the younger is column 2
 bPairs <- cbind(bins[-1], bins[-length(bins)])
-Dlist <- lapply(spp, function(s){
-  apply(bPairs, 1, function(x){
-    overlapD(b1=x[1], b2=x[2], sp=s)
+nichL <- lapply(spp, function(s){
+  l <- apply(bPairs, 1, function(x){
+    nicher(b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
   })
+  do.call(rbind, l)
 })
-dDf <- do.call(cbind, Dlist)
-row.names(dDf) <- bins[-1]
-colnames(dDf) <- spp
+nichDf <- do.call(rbind, nichL)
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
-dfNm <- paste0('Data/foram_niche_overlap_D_',day,'.csv')
-write.csv(dDf, dfNm)
+dfNm <- paste0('Data/foram_niche_sumry_metrics_',day,'.csv')
+write.csv(nichDf, dfNm, row.names=FALSE)
 
 ####################################################################
 # Data visualisation: least-squares cross-validation vs. subjective h
