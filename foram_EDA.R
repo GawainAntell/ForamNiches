@@ -2,17 +2,21 @@ library(ggplot2)
 library(sp)
 library(raster)
 
+# Data prep ---------------------------------------------------------------
+
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-occ <- read.csv('Data/foram_uniq_occs_latlong_8ka_wEnv_191219.csv', stringsAsFactors=FALSE)
-bins <- unique(occ$bin) #seq(4, 796, by=8)
+occ <- read.csv('Data/foram_MAT_occs_latlong_8ka_200103.csv', stringsAsFactors=FALSE)
+bins <- unique(occ$bin) 
 
 # split data into present-day (last 16 ka) vs. older
 modrn_rows <- occ$bin %in% bins[1:2]
 modrn <- occ[modrn_rows,]
 old <- occ[!modrn_rows,]
 
-# per-species sample size through time
+# Sample size plots -------------------------------------------------------
+
+# * per-species sample size -----------------------------------------------
 # boxplot of n occs per species, at each time bin
 
 sppN <- function(df,b){
@@ -43,74 +47,45 @@ pdf(bpNm, width=9, height=5)
 bp
 dev.off()
 
-
-# number of species (total or >5 occs) vs. time: line plot
+# * n species total -------------------------------------------------------
 
 countN <- function(bin,dat){
-  slc_rows <- dat$bin==bin
-  slc <- dat[slc_rows,]
-  tbl <- table(slc$species)
-  abund <- names(which(tbl > 5))
-  n <- c(length(tbl), length(abund))
-  names(n) <- c('n_tot','n_abund')
-  return(n)
+  slcBool <- dat$bin==bin
+  spp <- dat$species[slcBool]
+  length(unique(spp))
 }
 
-n_ser <- sapply(bins, countN, dat=occ)
-n_df <- data.frame(t(n_ser))
-n_df$t <- bins
+# don't count the 'species' that is from sampled locations
+nSer <- sapply(bins, countN, dat=occ) - 1
+nDf <- data.frame(cbind(n=nSer, t=bins))
 
 lplot <- 
-  ggplot(data=n_df) +
+  ggplot(data=nDf) +
   theme_bw() + labs(title = '') +
-  scale_x_continuous(name = 'ka (over 16 ky span)', expand=c(0,0),
-                     limits=c(0, 800), breaks=seq(8,792,by=64)) +
-  scale_y_continuous(name = 'n species') +
-  geom_line(aes(x=t, y=n_tot, colour='All spp'), lwd=0.7) +
-  geom_line(aes(x=t, y=n_abund, colour='> 5 occs'), lwd=0.7) +
-  geom_point(aes(x=t, y=n_tot, colour='All spp'), size=.8) +
-  geom_point(aes(x=t, y=n_abund, colour='> 5 occs'), size=.8) +
-  theme(legend.title = element_blank(),
-        axis.text.x = element_text(size = 8))
+  scale_x_continuous(name = 'ka (8ky-long bins)', expand=c(0,0)) +
+  scale_y_continuous(name = 'n species', limits=c(0,28), expand=c(0,0)) +
+  geom_line(aes(x=-t, y=n), lwd=0.7) +
+  geom_point(aes(x=-t, y=n), size=.8) 
 
 lNm <- paste0('tseries_spp_count_', day, '.pdf')
-pdf(lNm, width=5, height=3)
+pdf(lNm, width=4, height=3)
 lplot
 dev.off()
 
+# gifs --------------------------------------------------------------------
 
-# relative abundance vs. time: stacked bar plot
-
-old$bin <- as.factor(old$bin)
-bplot <- 
-  ggplot(data=old, aes(x=bin)) + theme_dark() +
-  scale_x_discrete(name = 'ka (over 16 ky span)') +
-  scale_y_continuous(name = 'n occurrences', 
-                     expand=c(0,0), limits=c(0,650)) +
-  geom_bar(aes(fill=species), colour='black', width = .7) +
-  theme(axis.text.x = element_text(angle=90, vjust=0.5),
-        legend.text = element_text(size=8),
-        legend.spacing.y = unit(5, 'mm')) +
-  guides(fill=guide_legend(ncol=2))
-
-bNm <- paste0('stacked_abundance_', day, '.pdf')
-pdf(bNm, width=11, height=8)
-bplot
-dev.off()
-
-
-# gif map of occurrences thorugh time
+# * occurrences thorugh time ----------------------------------------------
 
 modCodes <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
-r_all <- list.files('Data/gcm_annual_mean/')
-r_temp <- r_all[grep('temp', r_all)]
+rAll <- list.files('Data/gcm_annual_mean/')
+rTemp <- rAll[grep('temp', rAll)]
 
 for (b in bins){
   # read in relevant raster file
   mod <- modCodes$age_1000ka==b
   id <- modCodes$id[mod]
-  fl_pos <- grep(id, r_temp)
-  fl <- r_temp[fl_pos]
+  flPos <- grep(id, rTemp)
+  fl <- rTemp[flPos]
   rNm <- paste0('Data/gcm_annual_mean/',fl)
   r <- raster(rNm)
   
@@ -147,13 +122,25 @@ for (b in bins){
   png(pNm, width=1040, height=696) 
   print(rplot)
   dev.off()
+  
+  # also export snapshots in Mollweide projection for a few time steps
+  snaps <- c(0, 200, 400, 600) + bins[1]
+  ylims <- c(0,30)
+  mProj <- '+proj=laea'
+    #"+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84"
+  if (b %in% snaps){
+    m <- projectRaster(r, crs=mProj)
+    mNm <- paste0('Figs/Mollweide_surface_temp_', b3dig, 'ka_', day, '.png')
+    png(mNm, width=2080, height=2080)
+    plot(m, axes=FALSE, box=FALSE, legend=FALSE, col=colr)
+    dev.off()
+  }
 }
 
-# cd C:\Users\sjoh4751\Dropbox\Gwen\ForamNiches\Figs\gif_series
+# cd C:\Users\sjoh4751\Dropbox\Gwen\ForamNiches\Git\Figs\gif_series
 # magick convert -delay 50 -reverse -loop 1 map_surface_temp_and_occs*.png tseries_map_surface_temp_and_occs.gif
 
-
-# gif map of BVF thorugh time
+# * BVF thorugh time ------------------------------------------------------
 
 modCodes <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
 r_all <- list.files('Data/BruntVaisala/')
