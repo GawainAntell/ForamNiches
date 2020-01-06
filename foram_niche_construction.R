@@ -271,4 +271,36 @@ nich <- nich[!nas,]
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 dfNm <- paste0('Data/foram_niche_sumry_metrics_KDE_',day,'.csv')
-# write.csv(nich, dfNm, row.names=FALSE)
+write.csv(nich, dfNm, row.names=FALSE)
+
+# Raw value niche summary -------------------------------------------------
+# Note that using the KDE approach allows calculation of Schoener's D overlap.
+# Can't calculate overlap from the last time step because no modern data included.
+# So omit data from the most recent time step here, for comparability.
+
+recent <- df$bin %in% min(bins)
+df <- df[!recent,]
+
+# Need mean, variance, sample size, and age of trait values (MAT) for each sp & bin
+sumup <- function(bin, s, dat, binCol, sCol, traitCol){
+  slcRows <- which(dat[,binCol] == bin & dat[,sCol] == s)
+  if (length(slcRows)>0){
+    slc <- dat[slcRows,]
+    x <- slc[,traitCol]
+    m <- mean(x)
+    v <- sd(x)^2
+    n <- length(x)
+    rtrn <- data.frame(bin=bin, sp=s, m=m, v=v, n=n)
+  } else {
+    rtrn <- data.frame()
+  }
+  return(rtrn)
+}
+rawSumL <- lapply(spp, function(s){
+  temp <- lapply(bins[-1], sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol='mat')
+  tempDf <- do.call(rbind, temp)
+})
+rawSum <- do.call(rbind, rawSumL)
+
+rawSumNm <- paste0('Data/foram_niche_sumry_metrics_raw_values_',day,'.csv')
+write.csv(rawSum, rawSumNm, row.names=FALSE)
