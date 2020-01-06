@@ -65,14 +65,6 @@ addEnv <- function(bin, dat, binCol, cellCol, prj, envNm){
     slc[,env] <- envVals
   } 
   
-  # Calculate 'sampled' environment from all occs in every bin
-  # analogous to the calculations for each species
-  # Note: some species may be at same cell in a bin, so omit duplicates
-  dupes <- duplicated(slc[,cellCol])
-  smpld <- slc[!dupes,]
-  smpld$species <- 'sampled'
-  slc <- rbind(slc, smpld)
-  
   slc
 }
 
@@ -180,8 +172,27 @@ keepBool <- trunc$species %in% keepSpp
 trunc <- trunc[keepBool,]
 
 # note: no remaining observations at 740 ka!
-diff(sort(bins))
+binsObs <- sort(unique(trunc$bin))
+any(diff(binsObs) != binL)
 trim <- trunc$bin < 740
 trimmd <- trunc[trim,]
+binsNew <- sort(unique(trimmd$bin))
+
+# Calculate 'sampled' environment from all occs in every bin
+# analogous to the calculations for each species
+# Note: some species may be at same cell in a bin, so omit duplicates
+getSamp <- function(bin, dat, binCol, cellCol){
+  slcBool <- dat[,binCol] == bin
+  slc <- dat[slcBool,]
+  slcCells <- slc[,cellCol]
+  dupes <- duplicated(slc[,cellCol])
+  smpld <- slc[!dupes,]
+  smpld$species <- 'sampled'
+  rtrn <- rbind(slc, smpld)
+  rtrn
+}
+outL <- lapply(binsNew, getSamp, dat=trimmd, binCol='bin', cellCol='cell_number')
+outDf <- do.call(rbind, outL)
+
 outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
 write.csv(trimmd, outNm, row.names = FALSE)
