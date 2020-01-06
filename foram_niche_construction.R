@@ -195,4 +195,80 @@ outL <- lapply(binsNew, getSamp, dat=trimmd, binCol='bin', cellCol='cell_number'
 outDf <- do.call(rbind, outL)
 
 outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
-write.csv(trimmd, outNm, row.names = FALSE)
+write.csv(outDf, outNm, row.names = FALSE)
+
+# KDE niche summary -------------------------------------------------------
+
+# * Data prep -------------------------------------------------------------
+
+source('ecospat.grid.clim.dyn.GSA.fcn.R')
+
+df <- outDf # if starting from top of script
+# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200106.csv',stringsAsFactors=FALSE)
+bins <- unique(df$bin)
+nbins <- length(bins)
+spp <- unique(df$species)
+
+env <- 'mat'
+h.method <- "nrd0" # "SJ-ste" # "ucv"
+# Resolution of the gridding of the climate space. Ecospat default is 100.
+R <- 1000
+
+# Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
+nicher <- function(b1, b2, sp, env, h.method){
+  
+  globBool <- df$species=='sampled'
+  glob <- df[globBool,env]
+  
+  glob1rows <- which(df$species=='sampled' & df$bin==b1)
+  glob1 <- df[glob1rows,env]
+  
+  glob2rows <- which(df$species=='sampled' & df$bin==b2)
+  glob2 <- df[glob2rows,env]
+  
+  sp1rows <- which(df$species==sp & df$bin==b1)
+  sp1 <- df[sp1rows,env]
+  
+  sp2rows <- which(df$species==sp & df$bin==b2)
+  sp2 <- df[sp2rows,env]
+  
+  # for each species at time i and i+1
+  z1 <- tryCatch(
+    GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0, h.method=h.method),
+    error = function(err){ list() }
+  ) 
+  z2 <- tryCatch(
+    GSA.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0, th.env=0, h.method=h.method),
+    error = function(err){ list() }
+  ) 
+  
+  # the species may be absent in one or both bins, in which z1|2 is an empty vector
+  if (length(z1)==0){
+    data.frame(bin=NA, sp=NA, n=NA, d=NA, pa=NA, pe=NA, tol=NA)
+  } else {
+    n <- length(sp1rows)
+    if (length(z2)==0){
+      data.frame(bin=b1, sp=sp, n=n, d=NA, pa=z1$pa, pe=z1$pe, tol=z1$t)
+    } else{
+      ovrlp <- GSA.ecospat.niche.overlap(z1, z2, cor=FALSE)
+      data.frame(bin=b1, sp=sp, n=n, d=ovrlp$D, pa=z1$pa, pe=z1$pe, tol=z1$t)
+    }
+  }
+}
+
+# the older bin is column 1, the younger is column 2
+bPairs <- cbind(bins[-1], bins[-length(bins)])
+nichL <- lapply(spp, function(s){
+  l <- apply(bPairs, 1, function(x){
+    nicher(b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
+  })
+  do.call(rbind, l)
+})
+nich <- do.call(rbind, nichL)
+# remove NA rows
+nas <- is.na(nich$bin)
+nich <- nich[!nas,]
+
+day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
+dfNm <- paste0('Data/foram_niche_sumry_metrics_KDE_',day,'.csv')
+# write.csv(nich, dfNm, row.names=FALSE)
