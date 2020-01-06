@@ -184,4 +184,4 @@ diff(sort(bins))
 trim <- trunc$bin < 740
 trimmd <- trunc[trim,]
 outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
-write.csv(trunc, outNm, row.names = FALSE)
+write.csv(trimmd, outNm, row.names = FALSE)
