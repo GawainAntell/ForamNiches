@@ -5,6 +5,9 @@ library(foreach)
 library(iterators)
 library(doParallel)
 library(PBSmapping)
+library(adehabitatMA)
+library(adehabitatHR)
+library(ecospat)
 library(ggplot2)
 
 # Data import -------------------------------------------------------------
