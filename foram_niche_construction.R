@@ -207,7 +207,7 @@ write.csv(outDf, outNm, row.names = FALSE)
 source('ecospat.grid.clim.dyn.GSA.fcn.R')
 
 df <- outDf # if starting from top of script
-# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200106.csv',stringsAsFactors=FALSE)
+# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200108.csv',stringsAsFactors=FALSE)
 bins <- unique(df$bin)
 nbins <- length(bins)
 spp <- unique(df$species)
@@ -268,7 +268,7 @@ nichL <- lapply(spp, function(s){
   do.call(rbind, l)
 })
 nich <- do.call(rbind, nichL)
-# remove NA rows
+# remove NA rows (if a species is not sampled in the focal bin)
 nas <- is.na(nich$bin)
 nich <- nich[!nas,]
 
@@ -291,9 +291,9 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
     slc <- dat[slcRows,]
     x <- slc[,traitCol]
     m <- mean(x)
-    v <- sd(x)^2
+    sd <- sd(x)
     n <- length(x)
-    rtrn <- data.frame(bin=bin, sp=s, m=m, v=v, n=n)
+    rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
   } else {
     rtrn <- data.frame()
   }
