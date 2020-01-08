@@ -5,6 +5,8 @@ library(foreach)
 library(iterators)
 library(doParallel)
 
+# Data import -------------------------------------------------------------
+
 tRes <- 8
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
@@ -13,6 +15,36 @@ occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 
 # easier to work on scale of ka not ma
 occ$age <- occ$age*1000
+
+# Absence data --------------------------------------------------------------
+
+# Any original abundance of NA is suspect. Surprisingly, the abundance
+# for some of these records is > 0; those records aren't reliable.
+naAbund <- is.na(occ$orig.abundance)
+# summary(occ$abundance[naAbund])
+occ <- occ[!naAbund,]
+
+uniqAbund <- unique(occ$orig.abundance)
+numAbund <- as.numeric(uniqAbund)
+nonNum <- uniqAbund[is.na(numAbund)]
+nonNum
+
+# Some original abundance codings are ambiguous. Data in these categories should be omitted:
+bad <- c('-', '/', '*', 'rw?', '#0.0', '?1', 'p?')
+badBool <- occ$orig.abundance %in% bad
+occ <- occ[!badBool,]
+
+# There are ~150 original abundance codings that imply a species presence, but abundance is 0.
+# Modify the abundance so that these records are not discarded.
+ok <- setdiff(nonNum, bad)
+okBool <- occ$orig.abundance %in% ok
+occ$abundance[okBool] <- 1
+
+# Lastly, there is the case that abundance is recorded as 0; these are presumably absences.
+zeroBool <- occ$abundance==0
+occ <- occ[!zeroBool,]
+
+# Species-level data ------------------------------------------------------
 
 # remove T. cavernula and excelsa, which originated <800 ka
 tooYng <- which(occ$earliest < .8)
@@ -26,9 +58,8 @@ sppDat <- occ[,c('species',traits)]
 dupes <- duplicated(sppDat$species)
 sppDat <- sppDat[!dupes,]
 
-##########################################
-# add modern depth ranges to sp-level file, for species in both datasets
-# TODO check if there are any species in the 'final' output that still need depth data
+# Depth ranges ------------------------------------------------------------
+# add modern depth ranges to sp-level file
 
 # Read in modern depth ranges: Rebotim et al 2017, table 4
 dpthTbl <- read.table('Data/Rebotim_et_al_depth_ranges.txt',
@@ -136,8 +167,7 @@ irrel <- c('site','hole','core','section','sample.top','sample.type',
 cols2toss <- colnames(occ) %in% c(traits, irrel)
 occ <- occ[,!cols2toss]
 
-##########################################################
-# bin to time intervals to match GCM data
+# Time binning ------------------------------------------------------------
 
 brk <- seq(0, 800-tRes, by=tRes)
 bins <- data.frame(t=brk, b=brk+tRes, mid=brk+tRes/2)
@@ -152,7 +182,7 @@ for (r in 1:nrow(occ)){
   occ$bin[r] <- aBin
 }
 
-# No breeding populations at shallow depths
+# No breeding populations at shallow depths, so any occurrences there are suspect
 shall <- which(occ$water.depth < 150)
 occ <- occ[-shall,]
 
@@ -176,6 +206,8 @@ occ <- occ[-unconstrnd,]
 
 spp <- unique(occ$species)
 
+
+# Shorten to unique occs --------------------------------------------------
 # subset by bin, then species, then find unique species-cells combinations
 
 # omit duplicate cell-species combinations
@@ -205,6 +237,8 @@ pt2 <- proc.time()
 pt2-pt1
 
 fin <- do.call('rbind', stageDfList)
+
+# Cleaning ----------------------------------------------------------------
 
 # Subset occurrences such that eas sp has >5 occs per bin
 saveRows <- function(sp, bin, df){
