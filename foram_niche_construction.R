@@ -215,6 +215,11 @@ spp <- unique(df$species)
 env <- 'mat'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
 # Resolution of the gridding of the climate space. Ecospat default is 100.
+# Note that when the value is higher, the density sum will be increasingly
+# larger than unity. Possible reason (?): R interpolates between discrete points
+# using a trapezoid. This overestimates the integral in concave-up curves,
+# which are the tails of the niche distributions.
+# (https://commons.wikimedia.org/w/index.php?curid=8541370)
 R <- 1000
 
 # Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
@@ -275,6 +280,62 @@ nich <- nich[!nas,]
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 dfNm <- paste0('Data/foram_niche_sumry_metrics_KDE_',day,'.csv')
 write.csv(nich, dfNm, row.names=FALSE)
+
+# * Example KDE plots -----------------------------------------------------
+
+s <- 'Neogloboquadrina pachyderma'
+b1 <- 204
+b2 <- 404
+
+globBool <- df$species=='sampled'
+glob <- df[globBool,env]
+glob <- as.matrix(glob)
+
+xmax <- max(glob[, 1])
+xmin <- min(glob[, 1])
+x <- seq(from = min(glob[, 1]), to = max(glob[, 1]), 
+         length.out = R)
+
+sp1rows <- which(df$species==s & df$bin==b1)
+sp1 <- df[sp1rows,env]
+sp1 <- as.matrix(sp1)
+
+sp2rows <- which(df$species==s & df$bin==b2)
+sp2 <- df[sp2rows,env]
+sp2 <- as.matrix(sp2)
+
+sp1dens <- density(sp1[, 1], 
+                   kernel = "gaussian", 
+                   bw=h.method,
+                   n = R, 
+                   cut = 3
+)
+sp2dens <- density(sp2[, 1], 
+                   kernel = "gaussian", 
+                   bw=h.method,
+                   n = R, 
+                   cut = 3
+)
+
+p1nm <- paste0('Figs/KDE_Npachyderma_', b1, 'ka_', day, '.pdf')
+pdf(p1nm, width=5, height=5)
+  plot(sp1dens, xlim=c(xmin-6, xmax+6), main=paste(b1, 'ka,', s))
+  rug(sp1[,1])
+  polygon(sp1dens$x, sp1dens$y, col='orange')
+dev.off()
+
+p2nm <- paste0('Figs/KDE_Npachyderma_', b2, 'ka_', day, '.pdf')
+pdf(p2nm, width=5, height=5)
+  plot(sp2dens, xlim=c(xmin-6, xmax+6), main=paste(b2, 'ka,', s))
+  rug(sp2[,1])
+  polygon(sp2dens$x, sp2dens$y, col='orange')
+dev.off()
+
+p1 <- as.matrix(sp1dens$y)/sum(as.matrix(sp1dens$y))
+p2 <- as.matrix(sp2dens$y)/sum(as.matrix(sp2dens$y))
+absDiff <- abs(p1 - p2)
+D <- 1 - (0.5 * (sum(absDiff)))
+D
 
 # Raw value niche summary -------------------------------------------------
 # Note that using the KDE approach allows calculation of Schoener's D overlap.
