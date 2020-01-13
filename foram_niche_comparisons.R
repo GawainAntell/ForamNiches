@@ -10,8 +10,7 @@ library(ggplot2)
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200108.csv", stringsAsFactors=FALSE)
-  #read.csv("Data/foram_niche_sumry_metrics_KDE_200108.csv", stringsAsFactors=FALSE)
+df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200113.csv", stringsAsFactors=FALSE)
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
 
@@ -73,8 +72,13 @@ nich <- splitSpp[keepBool,]
 evoFit <- function(s){
   spBool <- nich$sp==s
   sp <- nich[spBool,]
+  # also subset the sampling time series to the same bins, for comparison
+  sBins <- sp$bin
+  sampBool <- nich$bin %in% sBins & nich$sp=='sampled1'
+  samp <- nich[sampBool,]
+  
   # ages must start at 0
-  sp$scaledT <- 1:nrow(sp) -1
+  samp$scaledT <- sp$scaledT <- 1:nrow(sp) -1
   
   # save metadata about the time series
   l <- nrow(sp)
@@ -82,11 +86,15 @@ evoFit <- function(s){
   
   ts <- as.paleoTS(mm = sp$m, vv = sp$sd^2, nn = sp$n, tt = sp$scaledT, 
                    oldest = 'first', reset.time = FALSE)
+  tsSamp <- as.paleoTS(mm = samp$m, vv = samp$sd^2, nn = samp$n, tt = samp$scaledT, 
+                       oldest = 'first', reset.time = FALSE)
   
   if (l < 14){
     mods <- fit4models(ts, method='Joint', silent=TRUE)
+    modsSamp <- fit4models(tsSamp, method='Joint', silent=TRUE)
   } else {
     mods <- fit9models(ts, method='Joint', silent=TRUE)
+    modsSamp <- fit9models(tsSamp, method='Joint', silent=TRUE)
   }
   # From the package documentation:
   # 'Method = "Joint" is a full likelihood approach, considering each time-series as a joint sample
@@ -104,7 +112,11 @@ evoFit <- function(s){
   w <- max(wts)
   params <- mods$parameters[modNm][[1]]
   
-  out <- data.frame(sp=s, bestMod=modNm, weight=w, l=l, start=strt)
+  # check what model would be predicted by sampling alone for the given time bins
+  sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
+  sampEvo <- row.names(modsSamp$modelFits)[sampMx]
+  
+  out <- data.frame(sp=s, bestMod=modNm, weight=w, l=l, start=strt, samplingMod=sampEvo)
   out$params <- list(params)
   out
 }
@@ -119,7 +131,7 @@ registerDoParallel(ncores)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
-# only 1 min runtime
+# only 2 min runtime
 
 table(mods$bestMod)
 
@@ -134,19 +146,38 @@ ts <- as.paleoTS(mm = samp$m, vv = samp$sd^2, nn = samp$n, tt = samp$scaledT,
 sampMods <- fit9models(ts, method='Joint', silent=TRUE)
 sampMods
 
+# * Plot sampled MAT t-series ---------------------------------------------
+
+samp$se <- samp$sd/sqrt(samp$n)
+puncParams <- sampMods$parameters$`Punc-1`
+jump <- puncParams['shift1']
+y1 <- puncParams['theta1']
+y2 <- puncParams['theta2']
+linep <- ggplot(data=samp) +
+  theme_bw() +
+  scale_y_continuous(name='mean annual temp at surface') +
+  scale_x_continuous(expand=c(0.01,0), name='ka')+
+  geom_linerange(aes(x=-bin, ymax=m+se, ymin=m-se)) +
+  geom_line(aes(x=-bin, y=m)) +
+  geom_segment(x=-bins[1], xend=-bins[jump], y=y1, yend=y1, colour='blue') +
+  geom_segment(x=0, xend=-bins[jump], y=y2, yend=y2, colour='blue') 
+
+lineNm <- paste0('Figs/sampled_MAT_tseries_wPunc_',day,'.pdf')
+pdf(lineNm, width=6, height=4)
+linep
+dev.off()
+
 # Inspection of mods by evo type ------------------------------------------
-#puncBool <- mods$bestMod=='Punc-1'
-#punc <- mods[puncBool,]
-#punc$params
+puncBool <- mods$bestMod=='Punc-1'
+punc <- mods[puncBool,]
+punc$params
 
-#grwBool <- mods$bestMod=='GRW'
-#grw <- mods[grwBool,]
-#grw$params
+grwBool <- mods$bestMod=='GRW'
+grw <- mods[grwBool,]
+grw$params
 
-#stasisBool <- mods$bestMod=='StrictStasis'
-#stasis <- mods[stasisBool,]
-
-# mods$sp[mods$bestMod != 'StrictStasis']
+stasisBool <- mods$bestMod=='StrictStasis'
+stasis <- mods[stasisBool,]
 
 spModBool <- mods$sp != 'sampled1'
 spMods <- mods[spModBool,]
@@ -170,7 +201,7 @@ dev.off()
 
 #source('ecospat.grid.clim.dyn.GSA.fcn.R')
 
-df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200108.csv',stringsAsFactors=FALSE)
+df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200113.csv',stringsAsFactors=FALSE)
 bins <- unique(df$bin)
 nbins <- length(bins)
 spp <- unique(df$species)
