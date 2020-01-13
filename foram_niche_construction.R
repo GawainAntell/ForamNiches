@@ -112,9 +112,10 @@ lwr <- max(sampSmry$min)
 p <- ggplot(data=sampSmry) + theme_bw() +
   scale_x_continuous(name='Time (ka)', expand=c(0.01,0)) +
   scale_y_continuous(name = 'MAT (degrees C)') +
-  geom_linerange(aes(x=-bin, ymin=min, ymax=max)) +
-  geom_hline(yintercept=uppr, colour='blue', lwd=1) +
-  geom_hline(yintercept=lwr, colour='blue', lwd=1)
+  geom_linerange(aes(x=-bin, ymin=min, ymax=max), colour='red') +
+  geom_linerange(aes(x=-bin, ymin=lwr, ymax=uppr), colour='black') +
+  geom_hline(yintercept=uppr, colour='grey', lwd=1) +
+  geom_hline(yintercept=lwr, colour='grey', lwd=1)
 
 pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
 pdf(pNm, width = 6, height=4)
@@ -122,18 +123,49 @@ p
 dev.off()
 
 trunc <- data.frame()
+outRows <- numeric()
 for (b in bins){
   bBool <- df$bin==b
   slc <- df[bBool,]
   tooBig <- which(slc$mat > uppr)
   tooSmol <- which(slc$mat < lwr)
   out <- c(tooBig, tooSmol)
-  slc <- slc[-out,]
+  if (length(out) > 0){
+    slc <- slc[-out,]
+  }
   trunc <- rbind(trunc, slc)
+  outRows <- c(outRows, out)
 }
 
+# * Evaluate degree of truncation -----------------------------------------
+
+df$trunc <- 'in range'
+tooBig <- which(df$mat > uppr)
+tooSmol <- which(df$mat < lwr)
+df$trunc[tooBig] <- 'high'
+df$trunc[tooSmol] <- 'low'
+
+mdrnBool <- df$bin %in% bins[1:2]
+mdrn <- df[mdrnBool,]
+old <- df[!mdrnBool,]
+old$trunc <- factor(old$trunc, levels=c('high','low','in range'))
+bars <- ggplot(data=old, aes(fill=trunc, x= - bin)) + 
+    scale_x_continuous(name='time (excluding last 16 ka)', expand=c(0.01,0)) +
+    scale_y_continuous(expand=c(0,0)) +
+  #  theme_bw() +
+    geom_bar(position="stack", width = 5) +
+    scale_fill_manual(name='MAT value in relation to cutoffs', 
+                      values=c('plum','gold','grey20')) +
+  theme(legend.position = 'top')
+
+barNm <- paste0('Figs/truncated_data_sample_size_',day,'.pdf')
+pdf(barNm, width=6, height=4)
+bars
+dev.off()
+
 # inspect the proportion of observations remaining
-nrow(trunc)/nrow(df)
+nrow(trunc)/nrow(df) # all data
+table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
 
 # * Clean -----------------------------------------------------------------
 
@@ -174,12 +206,9 @@ for (s in spp){
 keepBool <- trunc$species %in% keepSpp
 trunc <- trunc[keepBool,]
 
-# note: no remaining observations at 740 ka!
+# check for any gaps in the time series
 binsObs <- sort(unique(trunc$bin))
 any(diff(binsObs) != binL)
-trim <- trunc$bin < 740
-trimmd <- trunc[trim,]
-binsNew <- sort(unique(trimmd$bin))
 
 # Calculate 'sampled' environment from all occs in every bin
 # analogous to the calculations for each species
@@ -194,7 +223,7 @@ getSamp <- function(bin, dat, binCol, cellCol){
   rtrn <- rbind(slc, smpld)
   rtrn
 }
-outL <- lapply(binsNew, getSamp, dat=trimmd, binCol='bin', cellCol='cell_number')
+outL <- lapply(bins, getSamp, dat=trunc, binCol='bin', cellCol='cell_number')
 outDf <- do.call(rbind, outL)
 
 outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
@@ -207,7 +236,7 @@ write.csv(outDf, outNm, row.names = FALSE)
 source('ecospat.grid.clim.dyn.GSA.fcn.R')
 
 df <- outDf # if starting from top of script
-# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200108.csv',stringsAsFactors=FALSE)
+# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200113.csv',stringsAsFactors=FALSE)
 bins <- unique(df$bin)
 nbins <- length(bins)
 spp <- unique(df$species)
