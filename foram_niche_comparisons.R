@@ -4,15 +4,13 @@ library(foreach)
 library(iterators)
 library(doParallel)
 library(ggplot2)
-library(sp)
-library(raster)
-#library(VoCC)
-#devtools::install_github("JorGarMol/VoCC", dependencies = FALSE, build_vignettes = FALSE)
+library(cowplot)
+library(grid)
 
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200113.csv", stringsAsFactors=FALSE)
+df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200115.csv", stringsAsFactors=FALSE)
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
 
@@ -200,84 +198,46 @@ dev.off()
 
 # * Inter-spp niche overlap -----------------------------------------------
 
-#source('ecospat.grid.clim.dyn.GSA.fcn.R')
+pairD <- read.csv('Data/foram_species_pairs_KDE_D_200115.csv', stringsAsFactors=FALSE)
+# Watch out - not normally distributed because of bounds at 0 and 1.
+# But some values = 1 do occur, so can't do logit transformation.
 
-df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200113.csv',stringsAsFactors=FALSE)
-bins <- unique(df$bin)
-nbins <- length(bins)
-spp <- unique(df$species)
-env <- 'mat'
-h.method <- "nrd0" # "SJ-ste" # "ucv"
-R <- 1000
-
-interSppD <- function(b,df,R,h.method){
-  globBool <- df$species=='sampled'
-  glob <- df[globBool,env]
-  
-  glob1rows <- which(df$species=='sampled' & df$bin==b)
-  glob1 <- df[glob1rows,env]
-  
-  bSppRows <- which(df$species!='sampled' & df$bin==b)
-  bSpp <- unique(df$species[bSppRows])
-  
-  # Construct KDE of all species
-  kdeL <- lapply(bSpp, function(s){
-    spRows <- which(df$species==s & df$bin==b)
-    sp1 <- df[spRows,env]
-    z <- GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0, h.method=h.method)
-  }
-  )
-  names(kdeL) <- bSpp
-  
-  # Compute D for all pairs
-  d <- numeric()
-  for (s1 in bSpp){
-    for (s2 in bSpp){
-      if (s1==s2) {next} else{
-        ovrlpL <- GSA.ecospat.niche.overlap(kdeL[[s1]], kdeL[[s2]], cor=FALSE)
-        d <- c(d, ovrlpL$D)
-      }
-    }
-  }
-  
-  # Save a summary overlap value among species 
-  # Watch out - not normally distributed because of bounds at 0 and 1.
-  # But some values = 1 do occur, so can't do logit transformation.
-  # Safest approach is to work with the median isntead of mean.
-  median(d)
-}
-
-# Find the median niche overlap among species pairs in each time bin
-tMeds <- sapply(bins, interSppD, df=df, R=R, h.method=h.method)
+pairD$bin <- factor(pairD$bin, levels = bins)
+inter <- 
+  ggplot(data=pairD, aes(x=bin, y=d)) +
+  scale_y_continuous(limits=c(0,1.05), expand=c(0,0)) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=6),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
 
 # * Intra-sp niche overlap ------------------------------------------------
 
 kde <- read.csv("Data/foram_niche_sumry_metrics_KDE_200113.csv", stringsAsFactors=FALSE)
-kdeSpp <- unique(kde$sp)
-kdeSpp <- setdiff(kdeSpp, 'sampled')
-spMeds <- sapply(kdeSpp, function(s){
-  sBool <- kde$sp==s
-  slc <- kde[sBool,]
-  median(slc$d, na.rm=T)
-})
+kdeKeep <- kde$sp != 'sampled'
+kde <- kde[kdeKeep,]
+consec <- ! is.na(kde$d)
+kde <- kde[consec,]
+kde$shortNm <- sapply(kde$sp, function(txt){
+  splt <- strsplit(txt, ' ')
+  splt[[1]][2]
+} )
 
-summary(tMeds)
-summary(spMeds)
-t.test(tMeds, spMeds)
+intra <- 
+  ggplot(data=kde, aes(x=shortNm, y=d)) +
+  scale_y_continuous(limits=c(0,1.05), expand=c(0,0)) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
+        axis.title.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank())
 
-typeVect <- c(rep('intra',length(spMeds)), rep('inter',length(tMeds)) )
-dDf <- data.frame(d=c(spMeds, tMeds), type=typeVect)
-dDf$type <- factor(dDf$type)
-table(dDf$type)
-ymin <- min(dDf$d)*.97
-dBox <- ggplot(data=dDf, aes(x=type, y=d)) +
-  theme_minimal() +
-  scale_y_continuous(name='Schoener\'s D overlap', limits=c(ymin, 1), expand=c(0,0)) +
-  scale_x_discrete(name='', labels=c('Within species','Between species')) +
-  geom_boxplot(fill='grey')
-boxNm <- paste0('Figs/overlap_inter_vs_intra_medianD_',day,'.pdf')
-pdf(boxNm, width=4, height=4)
-  dBox
+y.grob <- textGrob('Schoener\'s D overlap', gp=gpar(fontface='bold', fontsize=15), rot=90)
+doubl <- plot_grid(inter, intra, nrow=1, align='h', rel_widths = c(1,0.35))
+
+ovrlpNm <- paste0('Figs/overlap_D_boxplots_inter_vs_intraspecific',day,'.pdf')
+pdf(ovrlpNm, width=9, height=5)
+grid.arrange(arrangeGrob(doubl, left = y.grob))
 dev.off()
 
 # Sampled vs. species optima ----------------------------------------------
