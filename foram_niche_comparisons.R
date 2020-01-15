@@ -4,6 +4,8 @@ library(foreach)
 library(iterators)
 library(doParallel)
 library(ggplot2)
+library(sp)
+library(raster)
 #library(VoCC)
 #devtools::install_github("JorGarMol/VoCC", dependencies = FALSE, build_vignettes = FALSE)
 
@@ -135,7 +137,7 @@ pt2-pt1
 
 table(mods$bestMod)
 
-# Sampling model ----------------------------------------------------------
+# * Sampling model --------------------------------------------------------
 
 sampBool <- nich$sp=='sampled1'
 samp <- nich[sampBool,]
@@ -167,7 +169,7 @@ pdf(lineNm, width=6, height=4)
 linep
 dev.off()
 
-# Inspection of mods by evo type ------------------------------------------
+# * Inspection of mods by evo type ----------------------------------------
 puncBool <- mods$bestMod=='Punc-1'
 punc <- mods[puncBool,]
 punc$params
@@ -193,7 +195,6 @@ bpNm <- paste0('Figs/evo_mode_barplot_',day,'.pdf')
 pdf(bpNm, width=4, height=3)
 bp
 dev.off()
-
 
 # Inter- vs intra- spp overlap --------------------------------------------
 
@@ -251,7 +252,7 @@ tMeds <- sapply(bins, interSppD, df=df, R=R, h.method=h.method)
 
 # * Intra-sp niche overlap ------------------------------------------------
 
-kde <- read.csv("Data/foram_niche_sumry_metrics_KDE_200108.csv", stringsAsFactors=FALSE)
+kde <- read.csv("Data/foram_niche_sumry_metrics_KDE_200113.csv", stringsAsFactors=FALSE)
 kdeSpp <- unique(kde$sp)
 kdeSpp <- setdiff(kdeSpp, 'sampled')
 spMeds <- sapply(kdeSpp, function(s){
@@ -295,3 +296,10 @@ cors <- sapply(kdeSpp, optCor, dat=kde)
 summary(cors)
 sum(cors>0)/length(cors)
 
+# Global climate t-series -------------------------------------------------
+
+glob <- read.csv('Data/global_surface_MAT_at_grid_pts_4ka.csv')
+bins <- samp$bin
+cols <- paste0('X',bins)
+globMean <- colMeans(glob[,cols])
+cor.test(globMean, samp$m)
