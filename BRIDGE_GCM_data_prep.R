@@ -187,25 +187,7 @@ xy <- expand.grid(x=x,y=y)
 #llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 xy <- SpatialPoints(xy, proj4string = CRS(llPrj))
 
-# the getBrik function is modified from foram_niche_construction script
-getBrik <- function(bin, envNm, mods){
-  modRow <- mods$age_1000ka == bin
-  id <- mods$id[modRow]
-  
-  # Load the rasters for only the desired env variables and time step
-  allFls <- list.files('Data/', recursive = TRUE)
-  txt <- paste0(id,'.*tif')
-  modFls <- grep(txt, allFls)
-  flNms <- paste0('Data/', allFls[modFls])
-  envFlPos <- sapply(envNm, grep, flNms)
-  envFlNms <- flNms[envFlPos]
-  
-  # Temperature raster files have 19 layers, 
-  # but if using mix layer depth or BVF then modify code for 1 layer
-  r <- lapply(envFlNms, brick)
-  names(r) <- envNm
-  r
-}
+source('raster_brick_import_fcn.R')
 
 # save MAT from standard global globe as rows=cells, columns=time bins
 # can do any summaries as column operations later
