@@ -35,30 +35,13 @@ llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 
 # Combine enviro and spp data ---------------------------------------------
 
-getBrik <- function(bin, envNm){
-  modRow <- modId$age_1000ka == bin
-  id <- modId$id[modRow]
-  
-  # Load the rasters for only the desired env variables and time step
-  allFls <- list.files('Data/', recursive = TRUE)
-  txt <- paste0(id,'.*tif')
-  modFls <- grep(txt, allFls)
-  flNms <- paste0('Data/', allFls[modFls])
-  envFlPos <- sapply(envNm, grep, flNms)
-  envFlNms <- flNms[envFlPos]
-  
-  # Temperature raster files have 19 layers, 
-  # but if using mix layer depth or BVF then modify code for 1 layer
-  r <- lapply(envFlNms, brick)
-  names(r) <- envNm
-  r
-}
+source('raster_brick_import_fcn.R')
 
 addEnv <- function(bin, dat, binCol, cellCol, prj, envNm){
   slcBool <- dat[,binCol] == bin
   slc <- dat[slcBool,]
   slcCells <- slc[,cellCol]
-  slcEnv <- getBrik(bin=bin, envNm=envNm)
+  slcEnv <- getBrik(bin=bin, envNm=envNm, mods=modId)
   
   for (env in envNm){
     envVals <- raster::extract(slcEnv[[env]], slcCells)
