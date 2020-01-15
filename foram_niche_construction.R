@@ -216,7 +216,7 @@ write.csv(outDf, outNm, row.names = FALSE)
 
 # * Data prep -------------------------------------------------------------
 
-source('ecospat.grid.clim.dyn.GSA.fcn.R')
+source('GSA_custom_ecospat_fcns.R')
 
 df <- outDf # if starting from top of script
 # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200113.csv',stringsAsFactors=FALSE)
@@ -349,13 +349,48 @@ absDiff <- abs(p1 - p2)
 D <- 1 - (0.5 * (sum(absDiff)))
 D
 
-# Raw value niche summary -------------------------------------------------
-# Note that using the KDE approach allows calculation of Schoener's D overlap.
-# Can't calculate overlap from the last time step because no modern data included.
-# So omit data from the most recent time step here, for comparability.
 
-recent <- df$bin %in% min(bins)
-df <- df[!recent,]
+# * Inter-specific overlap ------------------------------------------------
+
+interSppD <- function(b, df, R, h.method){
+  globBool <- df$species=='sampled'
+  glob <- df[globBool,env]
+  
+  glob1rows <- which(df$species=='sampled' & df$bin==b)
+  glob1 <- df[glob1rows,env]
+  
+  bSppRows <- which(df$species!='sampled' & df$bin==b)
+  bSpp <- unique(df$species[bSppRows])
+  
+  # Construct KDE of all species
+  kdeL <- lapply(bSpp, function(s){
+    spRows <- which(df$species==s & df$bin==b)
+    sp1 <- df[spRows,env]
+    z <- GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0, h.method=h.method)
+  }
+  )
+  names(kdeL) <- bSpp
+  
+  # Compute Schoener's D for all species pairs
+  fin <- data.frame()
+  for (s1 in bSpp){
+    for (s2 in bSpp){
+      if (s1==s2) {next} else{
+        ovrlpL <- GSA.ecospat.niche.overlap(kdeL[[s1]], kdeL[[s2]], cor=FALSE)
+        d <- ovrlpL$D
+        pairDat <- data.frame(bin=b, sp1=s1, sp2=s2, d=d)
+        fin <- rbind(fin, pairDat)
+      }
+    }
+  }
+  fin
+}
+interSppL <- lapply(bins, interSppD, df=df, R=R, h.method=h.method)
+interSppDf <- do.call(rbind, interSppL)
+interSppNm <- paste0('Data/foram_species_pairs_KDE_D_', day, '.csv')
+write.csv(interSppDf, interSppNm, row.names=FALSE)
+
+# Raw value niche summary -------------------------------------------------
 
 # Need mean, variance, sample size, and age of trait values (MAT) for each sp & bin
 sumup <- function(bin, s, dat, binCol, sCol, traitCol){
@@ -373,7 +408,7 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
   return(rtrn)
 }
 rawSumL <- lapply(spp, function(s){
-  temp <- lapply(bins[-1], sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol='mat')
+  temp <- lapply(bins, sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol='mat')
   tempDf <- do.call(rbind, temp)
 })
 rawSum <- do.call(rbind, rawSumL)
