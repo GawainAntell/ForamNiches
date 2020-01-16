@@ -1,3 +1,4 @@
+library(PerformanceAnalytics)
 library(paleoTS)
 library(parallel)
 library(foreach)
@@ -6,19 +7,14 @@ library(doParallel)
 library(ggplot2)
 library(cowplot)
 library(grid)
+library(gridExtra)
 
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200115.csv", stringsAsFactors=FALSE)
+df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200116.csv", stringsAsFactors=FALSE)
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
-
-# if using KDE data, rename niche variables for consistency with those from raw values:
-nc <- ncol(df)
-if (nc > 5){
-  colnames(df)[(nc-1) : nc] <- c('m','sd')
-}
 
 bins <- unique(df$bin)
 spp <- unique(df$sp)
@@ -66,6 +62,43 @@ for (s in epithets){
 }
 keepBool <- splitSpp$sp %in% longSpp
 nich <- splitSpp[keepBool,]
+
+# Sampled vs global MAT corr ----------------------------------------------
+
+# calculate mean absolute latitude at sampling points
+allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200116.csv')
+allSampBool <- allPts$species=='sampled'
+allSamp <- allPts[allSampBool,]
+absLat <- sapply(bins, function(b){
+  slcBool <- allSamp$bin==b
+  slc <- allSamp[slcBool,]
+  abslat <- abs(slc$centroid_lat)
+  mean(abslat)
+})
+
+# calculate mean MAT over globe, at set grid of points
+glob <- read.csv('Data/global_surface_MAT_at_grid_pts_4ka.csv')
+cols <- paste0('X',bins)
+globMean <- colMeans(glob[,cols])
+
+# combine with sampling n and mean MAT
+sampBool <- nich$sp=='sampled1'
+samp <- nich[sampBool,]
+sampMean <- samp$m
+logSampN <- log(samp$n)
+
+corVars <- cbind(logSampN, absLat, sampMean, globMean)
+
+# There are WAY more sampling points in the last 2 time steps -
+# these are very influential points, so exclude from cor tests.
+# But could also include these points - they aren't really outliers.
+excl <- nrow(corVars) - 0:1
+corVars <- corVars[-excl,]
+
+corNm <- paste0('Figs/correlations_sampled_vs_global_',day,'.pdf')
+pdf(corNm, width=5, height=5)
+chart.Correlation(corVars, histogram=TRUE, pch=19, method='pearson')
+dev.off()
 
 # Evo models --------------------------------------------------------------
 
@@ -137,8 +170,6 @@ table(mods$bestMod)
 
 # * Sampling model --------------------------------------------------------
 
-sampBool <- nich$sp=='sampled1'
-samp <- nich[sampBool,]
 # ages must start at 0
 samp$scaledT <- 1:nrow(samp) -1
 ts <- as.paleoTS(mm = samp$m, vv = samp$sd^2, nn = samp$n, tt = samp$scaledT, 
@@ -198,7 +229,7 @@ dev.off()
 
 # * Inter-spp niche overlap -----------------------------------------------
 
-pairD <- read.csv('Data/foram_species_pairs_KDE_D_200115.csv', stringsAsFactors=FALSE)
+pairD <- read.csv('Data/foram_species_pairs_KDE_D_200116.csv', stringsAsFactors=FALSE)
 # Watch out - not normally distributed because of bounds at 0 and 1.
 # But some values = 1 do occur, so can't do logit transformation.
 
@@ -213,9 +244,9 @@ inter <-
 
 # * Intra-sp niche overlap ------------------------------------------------
 
-kde <- read.csv("Data/foram_niche_sumry_metrics_KDE_200113.csv", stringsAsFactors=FALSE)
-kdeKeep <- kde$sp != 'sampled'
-kde <- kde[kdeKeep,]
+kdeFull <- read.csv("Data/foram_niche_sumry_metrics_KDE_200116.csv", stringsAsFactors=FALSE)
+kdeKeep <- kdeFull$sp != 'sampled'
+kde <- kdeFull[kdeKeep,]
 consec <- ! is.na(kde$d)
 kde <- kde[consec,]
 kde$shortNm <- sapply(kde$sp, function(txt){
@@ -241,7 +272,7 @@ grid.arrange(arrangeGrob(doubl, left = y.grob))
 dev.off()
 
 # Sampled vs. species optima ----------------------------------------------
-
+realSpp <- setdiff(spp, 'sampled')
 optCor <- function(s, dat){
   sampBool <- dat$sp=='sampled'
   samp <- dat[sampBool,]
@@ -252,14 +283,7 @@ optCor <- function(s, dat){
   samp <- samp[sampSame,]
   cor(samp$pe, sDat$pe, method='spear')
 }
-cors <- sapply(kdeSpp, optCor, dat=kde)
+cors <- sapply(realSpp, optCor, dat=kdeFull)
 summary(cors)
 sum(cors>0)/length(cors)
-
-# Global climate t-series -------------------------------------------------
-
-glob <- read.csv('Data/global_surface_MAT_at_grid_pts_4ka.csv')
-bins <- samp$bin
-cols <- paste0('X',bins)
-globMean <- colMeans(glob[,cols])
-cor.test(globMean, samp$m)
+boxplot(cors)
