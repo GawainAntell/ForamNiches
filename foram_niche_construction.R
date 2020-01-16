@@ -266,7 +266,7 @@ h.method <- "nrd0" # "SJ-ste" # "ucv"
 # using a trapezoid. This overestimates the integral in concave-up curves,
 # which are the tails of the niche distributions.
 # (https://commons.wikimedia.org/w/index.php?curid=8541370)
-R <- 1000
+R <- 2^10
 
 # Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
 nicher <- function(b1, b2, sp, env, h.method){
@@ -312,6 +312,12 @@ nicher <- function(b1, b2, sp, env, h.method){
 
 # the older bin is column 1, the younger is column 2
 bPairs <- cbind(bins[-1], bins[-length(bins)])
+# for the most recent time bin, it's not possible to calculate overlap
+# (because no modern data are included), but include it anyway
+# so that the standing niche at the last time bin is calculated
+recent <- cbind(4, NA)
+bPairs <- rbind(recent, bPairs)
+
 nichL <- lapply(spp, function(s){
   l <- apply(bPairs, 1, function(x){
     nicher(b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
@@ -383,7 +389,6 @@ absDiff <- abs(p1 - p2)
 D <- 1 - (0.5 * (sum(absDiff)))
 D
 
-
 # * Inter-specific overlap ------------------------------------------------
 
 interSppD <- function(b, df, R, h.method){
@@ -410,8 +415,7 @@ interSppD <- function(b, df, R, h.method){
   for (s1 in bSpp){
     for (s2 in bSpp){
       if (s1==s2) {next} else{
-        ovrlpL <- GSA.ecospat.niche.overlap(kdeL[[s1]], kdeL[[s2]], cor=FALSE)
-        d <- ovrlpL$D
+        d <- GSA.ecospat.niche.overlap(kdeL[[s1]], kdeL[[s2]], cor=FALSE)
         pairDat <- data.frame(bin=b, sp1=s1, sp2=s2, d=d)
         fin <- rbind(fin, pairDat)
       }
