@@ -1,3 +1,6 @@
+library(phytools)
+library(paleoPhylo)
+library(ape)
 library(sp)
 library(raster)
 library(parallel)
@@ -10,30 +13,59 @@ library(adehabitatHR)
 library(ecospat)
 library(ggplot2)
 
-# Data import -------------------------------------------------------------
-
 # save names to put packages on all cores later
 pkgs <- c('sp','raster') 
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-# Read in occurrence data
-source('read_foram_data.R')
+# Data import -------------------------------------------------------------
 
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
-envNm <- c('ann_temp_ym_dpth'
-            #'month_temp_range', 
-            #'month_temp_max',
-            #'month_temp_min',
-            #'ann_otracer14_ym_dpth',
-            #'ann_mixLyrDpth_ym_uo',
-            #'ann_salinity_ym_dpth',
-            #'ann_W_ym_dpth'
-             )
-# Note: envNm can be a vector
-llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+# Read in occurrence data
+occ <- read.csv('Data/foram_uniq_occs_latlong_8ka_200108.csv', stringsAsFactors=FALSE)
+bins <- unique(occ$bin)
+
+# Limit analysis to species included in tree from Aze et al. 2011
+trRaw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
+trRaw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', trRaw$Species.name)
+trRaw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', trRaw$Species.name)
+tr_paleo <- with(trRaw, 
+                 as.paleoPhylo(Species.code, Ancestor.code, Start.date, End.date)
+)
+tr <- buildApe(tr_paleo)
+sppCodes <- tr$tip.label
+rowOrdr <- match(sppCodes, trRaw$Species.code)
+tr$tip.label <- trRaw$Species.name[rowOrdr]
+
+# 9 species are not present in the phylogeny, mostly because microporiferate
+sppAll <- unique(occ$species)
+lostSpp <- setdiff(sppAll, tr$tip.label)
+
+# Beella megastoma is arguably the same species as B. digitata,
+# and Truncorotalia crassula is arguably senior synonym to crassaformis
+# (Schiebel and Hemleben 2017). The depth ranges for both are unknown.
+lostSpp <- c(lostSpp, 'Beella megastoma', 'Truncorotalia crassula')
+
+spp <- setdiff(sppAll, lostSpp)
+rows2toss <- ! occ$species %in% spp
+occ <- occ[!rows2toss,]
+row.names(occ) <- as.character(1:nrow(occ))
 
 # Combine enviro and spp data ---------------------------------------------
+
+envNm <- c('ann_temp_ym_dpth'
+           #'month_temp_range', 
+           #'month_temp_max',
+           #'month_temp_min',
+           #'ann_otracer14_ym_dpth',
+           #'ann_mixLyrDpth_ym_uo',
+           #'ann_salinity_ym_dpth',
+           #'ann_W_ym_dpth'
+)
+# Note: code below can deal with envNm that's a vector
+
+llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 
 source('raster_brick_import_fcn.R')
 
@@ -194,8 +226,8 @@ binsObs <- sort(unique(trunc$bin))
 any(diff(binsObs) != binL)
 
 # Calculate 'sampled' environment from all occs in every bin
-# analogous to the calculations for each species
-# Note: some species may be at same cell in a bin, so omit duplicates
+# analogous to the calculations for each species.
+# Note: some species may be at same cell in a bin, so omit duplicates.
 getSamp <- function(bin, dat, binCol, cellCol){
   slcBool <- dat[,binCol] == bin
   slc <- dat[slcBool,]
@@ -218,12 +250,14 @@ write.csv(outDf, outNm, row.names = FALSE)
 
 source('GSA_custom_ecospat_fcns.R')
 
-df <- outDf # if starting from top of script
-# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200113.csv',stringsAsFactors=FALSE)
-bins <- unique(df$bin)
+df <- outDf 
+
+# if starting from top of script, run the following lines to jump in from here:
+# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200116.csv',stringsAsFactors=FALSE)
+# bins <- unique(df$bin)
+
 nbins <- length(bins)
 spp <- unique(df$species)
-
 env <- 'mat'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
 # Resolution of the gridding of the climate space. Ecospat default is 100.
@@ -262,7 +296,7 @@ nicher <- function(b1, b2, sp, env, h.method){
     error = function(err){ list() }
   ) 
   
-  # the species may be absent in one or both bins, in which z1|2 is an empty vector
+  # the species may be absent in one or both bins, in which case z is an empty list
   if (length(z1)==0){
     data.frame(bin=NA, sp=NA, n=NA, d=NA, pa=NA, pe=NA, tol=NA)
   } else {
@@ -271,7 +305,7 @@ nicher <- function(b1, b2, sp, env, h.method){
       data.frame(bin=b1, sp=sp, n=n, d=NA, pa=z1$pa, pe=z1$pe, tol=z1$t)
     } else{
       ovrlp <- GSA.ecospat.niche.overlap(z1, z2, cor=FALSE)
-      data.frame(bin=b1, sp=sp, n=n, d=ovrlp$D, pa=z1$pa, pe=z1$pe, tol=z1$t)
+      data.frame(bin=b1, sp=sp, n=n, d=ovrlp, pa=z1$pa, pe=z1$pe, tol=z1$t)
     }
   }
 }
