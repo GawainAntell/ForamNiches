@@ -244,20 +244,51 @@ outDf <- do.call(rbind, outL)
 outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
 write.csv(outDf, outNm, row.names = FALSE)
 
+# Simulate uniform niche spp ----------------------------------------------
+
+df <- outDf 
+
+# if starting from top of script, run the following lines to jump in from here:
+  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200116.csv',stringsAsFactors=FALSE)
+  # bins <- unique(df$bin)
+  # day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
+
+spp <- unique(df$species)
+
+sampBool <- df$species=='sampled'
+samp <- df[sampBool,]
+
+simNiche <- function(s, b, dat, sCol, bCol, samp){
+  spBinBool <- dat[,sCol]==s & dat[,bCol]==b
+  n <- sum(spBinBool)
+  if (n>0){
+    sampBinBool <- samp[,bCol]==b
+    sampBin <- samp[sampBinBool,]
+    rows <- 1:nrow(sampBin)
+    rows4sim <- sample(rows, n)
+    simDat <- sampBin[rows4sim,]
+    simDat[,sCol] <- s
+    return(simDat)
+  }
+}
+
+simOverbins <- function(b){
+  simL <- lapply(spp, b=b, simNiche, dat=df, sCol='species', bCol='bin', samp=samp)
+  simDf <- do.call(rbind, simL)
+}
+simL <- lapply(bins, simOverbins)
+simDf <- do.call(rbind, simL)
+
+simNm <- paste0('Data/uniform_niche_sim_MAT_occs_latlong_8ka_',day,'.csv')
+write.csv(simDf, simNm, row.names=FALSE)
+
 # KDE niche summary -------------------------------------------------------
 
 # * Data prep -------------------------------------------------------------
 
 source('GSA_custom_ecospat_fcns.R')
 
-df <- outDf 
-
-# if starting from top of script, run the following lines to jump in from here:
-# df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200116.csv',stringsAsFactors=FALSE)
-# bins <- unique(df$bin)
-
 nbins <- length(bins)
-spp <- unique(df$species)
 env <- 'mat'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
 # Resolution of the gridding of the climate space. Ecospat default is 100.
@@ -269,22 +300,22 @@ h.method <- "nrd0" # "SJ-ste" # "ucv"
 R <- 2^10
 
 # Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
-nicher <- function(b1, b2, sp, env, h.method){
+nicher <- function(dat, b1, b2, sp, env, h.method){
   
-  globBool <- df$species=='sampled'
-  glob <- df[globBool,env]
+  globBool <- dat$species=='sampled'
+  glob <- dat[globBool,env]
   
-  glob1rows <- which(df$species=='sampled' & df$bin==b1)
-  glob1 <- df[glob1rows,env]
+  glob1rows <- which(dat$species=='sampled' & dat$bin==b1)
+  glob1 <- dat[glob1rows,env]
   
-  glob2rows <- which(df$species=='sampled' & df$bin==b2)
-  glob2 <- df[glob2rows,env]
+  glob2rows <- which(dat$species=='sampled' & dat$bin==b2)
+  glob2 <- dat[glob2rows,env]
   
-  sp1rows <- which(df$species==sp & df$bin==b1)
-  sp1 <- df[sp1rows,env]
+  sp1rows <- which(dat$species==sp & dat$bin==b1)
+  sp1 <- dat[sp1rows,env]
   
-  sp2rows <- which(df$species==sp & df$bin==b2)
-  sp2 <- df[sp2rows,env]
+  sp2rows <- which(dat$species==sp & dat$bin==b2)
+  sp2 <- dat[sp2rows,env]
   
   # for each species at time i and i+1
   z1 <- tryCatch(
@@ -320,7 +351,7 @@ bPairs <- rbind(recent, bPairs)
 
 nichL <- lapply(spp, function(s){
   l <- apply(bPairs, 1, function(x){
-    nicher(b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
+    nicher(dat=df, b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
   })
   do.call(rbind, l)
 })
@@ -329,9 +360,20 @@ nich <- do.call(rbind, nichL)
 nas <- is.na(nich$bin)
 nich <- nich[!nas,]
 
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 dfNm <- paste0('Data/foram_niche_sumry_metrics_KDE_',day,'.csv')
 write.csv(nich, dfNm, row.names=FALSE)
+
+simNichL <- lapply(spp, function(s){
+  l <- apply(bPairs, 1, function(x){
+    nicher(dat=simDf, b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
+  })
+  do.call(rbind, l)
+})
+simNich <- do.call(rbind, simNichL)
+simNas <- is.na(simNich$bin)
+simNich <- simNich[!simNas,]
+simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_KDE_',day,'.csv')
+write.csv(simNich, simNm, row.names=FALSE)
 
 # * Example KDE plots -----------------------------------------------------
 
@@ -428,6 +470,11 @@ interSppDf <- do.call(rbind, interSppL)
 interSppNm <- paste0('Data/foram_species_pairs_KDE_D_', day, '.csv')
 write.csv(interSppDf, interSppNm, row.names=FALSE)
 
+interSimL <- lapply(bins, interSppD, df=simDf, R=R, h.method=h.method)
+interSim <- do.call(rbind, interSimL)
+interSimNm <- paste0('Data/uniform_niche_sim_pairs_KDE_D_', day, '.csv')
+write.csv(interSim, interSimNm, row.names=FALSE)
+
 # Raw value niche summary -------------------------------------------------
 
 # Need mean, variance, sample size, and age of trait values (MAT) for each sp & bin
@@ -445,11 +492,19 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
   }
   return(rtrn)
 }
+
 rawSumL <- lapply(spp, function(s){
   temp <- lapply(bins, sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol='mat')
   tempDf <- do.call(rbind, temp)
 })
 rawSum <- do.call(rbind, rawSumL)
-
 rawSumNm <- paste0('Data/foram_niche_sumry_metrics_raw_values_',day,'.csv')
 write.csv(rawSum, rawSumNm, row.names=FALSE)
+
+rawSimL <- lapply(spp, function(s){
+  temp <- lapply(bins, sumup, s=s, dat=simDf, binCol='bin', sCol='species', traitCol='mat')
+  tempDf <- do.call(rbind, temp)
+})
+rawSim <- do.call(rbind, rawSimL)
+rawSimNm <- paste0('Data/uniform_niche_sim_sumry_metrics_raw_values_',day,'.csv')
+write.csv(rawSim, rawSimNm, row.names=FALSE)
