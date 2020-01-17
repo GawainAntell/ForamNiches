@@ -278,6 +278,7 @@ dev.off()
 
 # Sampled vs. species optima ----------------------------------------------
 realSpp <- setdiff(spp, 'sampled')
+nReal <- length(realSpp)
 optCor <- function(s, dat){
   spBool <- dat$sp==s
   sDat <- dat[spBool,]
@@ -285,7 +286,22 @@ optCor <- function(s, dat){
   gDat <- globMean[bNms]
   cor(gDat, sDat$pe, method='spear')
 }
-cors <- sapply(realSpp, optCor, dat=kdeFull)
-summary(cors)
-sum(cors>0)/length(cors)
-boxplot(cors)
+
+corsReal <- sapply(realSpp, optCor, dat=kdeFull)
+
+kdeSim <- read.csv("Data/uniform_niche_sim_sumry_metrics_KDE_200117.csv", stringsAsFactors=FALSE)
+corsSim <- sapply(realSpp, optCor, dat=kdeSim)
+
+trt <- c(rep('real species',nReal), rep('simulated neutral niche',nReal))
+cors <- data.frame(cor=c(corsReal, corsSim), treatment=trt)
+boxes <- 
+  ggplot(data=cors, aes(x=trt, y=cor)) +
+  geom_boxplot() +
+  scale_y_continuous(name='rho correlation with global MAT') +
+  theme(axis.title.x=element_blank())
+boxesNm <- paste0('Figs/optima_corr_w_global_MAT_', day, '.pdf')
+pdf(boxesNm, width=4, height=4)
+boxes
+dev.off()
+
+t.test(corsReal, corsSim, paired = TRUE)
