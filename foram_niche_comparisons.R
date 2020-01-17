@@ -87,6 +87,11 @@ samp <- nich[sampBool,]
 sampMean <- samp$m
 logSampN <- log(samp$n)
 
+# no autocorrelation in residuals of main relationship of interest
+l <- lm(sampMean~globMean)
+r <- resid(l)
+acf(r)
+
 corVars <- cbind(logSampN, absLat, sampMean, globMean)
 
 # There are WAY more sampling points in the last 2 time steps -
@@ -274,14 +279,11 @@ dev.off()
 # Sampled vs. species optima ----------------------------------------------
 realSpp <- setdiff(spp, 'sampled')
 optCor <- function(s, dat){
-  sampBool <- dat$sp=='sampled'
-  samp <- dat[sampBool,]
-  # acf(samp$pe) # surprisingly small AC
   spBool <- dat$sp==s
   sDat <- dat[spBool,]
-  sampSame <- samp$bin %in% sDat$bin
-  samp <- samp[sampSame,]
-  cor(samp$pe, sDat$pe, method='spear')
+  bNms <- paste0('X',sDat$bin)
+  gDat <- globMean[bNms]
+  cor(gDat, sDat$pe, method='spear')
 }
 cors <- sapply(realSpp, optCor, dat=kdeFull)
 summary(cors)
