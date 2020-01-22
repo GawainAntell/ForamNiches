@@ -12,7 +12,8 @@ library(gridExtra)
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200116.csv", stringsAsFactors=FALSE)
+#df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_trunc_200116.csv", stringsAsFactors=FALSE)
+df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200122.csv", stringsAsFactors=FALSE)
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
 
@@ -66,7 +67,8 @@ nich <- splitSpp[keepBool,]
 # Sampled vs global MAT corr ----------------------------------------------
 
 # calculate mean absolute latitude at sampling points
-allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200116.csv')
+#allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200116.csv')
+allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200122.csv')
 allSampBool <- allPts$species=='sampled'
 allSamp <- allPts[allSampBool,]
 absLat <- sapply(bins, function(b){
@@ -169,7 +171,7 @@ registerDoParallel(ncores)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
-# only 2 min runtime
+# 4 min runtime
 
 table(mods$bestMod)
 
@@ -182,25 +184,35 @@ ts <- as.paleoTS(mm = samp$m, vv = samp$sd^2, nn = samp$n, tt = samp$scaledT,
 sampMods <- fit9models(ts, method='Joint', silent=TRUE)
 sampMods
 
-# * Plot sampled MAT t-series ---------------------------------------------
+# * Species vs sampling evo mode plot -------------------------------------
 
-samp$se <- samp$sd/sqrt(samp$n)
-puncParams <- sampMods$parameters$`Punc-1`
-jump <- puncParams['shift1']
-y1 <- puncParams['theta1']
-y2 <- puncParams['theta2']
-linep <- ggplot(data=samp) +
+evoModes <- names(sampMods$parameters)
+xy <- expand.grid(spMode=evoModes, sampMode=evoModes, stringsAsFactors=FALSE)
+xy$n <- NA
+for (i in 1:nrow(xy)){
+  x <- xy$sampMode[i]
+  y <- xy$spMode[i]
+  same <- which(mods$samplingMod==x & mods$bestMod==y)
+  n <- length(same)
+  xy$n[i] <- n
+}
+xy$spMode <- factor(xy$spMode, levels=evoModes)
+xy$sampMode <- factor(xy$sampMode, levels=evoModes)
+empty <- xy$n==0
+xy <- xy[!empty,]
+
+bubbl <- 
+  ggplot(data=xy, aes(x=sampMode, y=spMode, size=n)) +
   theme_bw() +
-  scale_y_continuous(name='mean annual temp at surface') +
-  scale_x_continuous(expand=c(0.01,0), name='ka')+
-  geom_linerange(aes(x=-bin, ymax=m+se, ymin=m-se)) +
-  geom_line(aes(x=-bin, y=m)) +
-  geom_segment(x=-bins[1], xend=-bins[jump], y=y1, yend=y1, colour='blue') +
-  geom_segment(x=0, xend=-bins[jump], y=y2, yend=y2, colour='blue') 
+  geom_point() +
+  scale_x_discrete(name = 'Sampling model', drop=FALSE) +
+  scale_y_discrete(name = 'Species model', drop=FALSE) +
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5)) +
+  scale_size(range=c(2,10))
 
-lineNm <- paste0('Figs/sampled_MAT_tseries_wPunc_',day,'.pdf')
-pdf(lineNm, width=6, height=4)
-linep
+bubblNm <- paste0('Figs/evo_mode_bubble_matrix_', day, '.pdf')
+pdf(bubblNm, width=5, height=4.4)
+bubbl
 dev.off()
 
 # * Inspection of mods by evo type ----------------------------------------
