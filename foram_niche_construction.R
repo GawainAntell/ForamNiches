@@ -13,6 +13,9 @@ library(adehabitatHR)
 library(ecospat)
 library(ggplot2)
 
+# set whether or not to truncate to standard global temperature range
+doTrunc <- TRUE
+
 # save names to put packages on all cores later
 pkgs <- c('sp','raster') 
 
@@ -111,6 +114,8 @@ colnames(df)[ncol(df)] <- 'mat'
 
 # Truncate to standard temp range -----------------------------------------
 
+if (doTrunc){
+  
 minmax <- function(df, b, env){
   bBool <- df[,'bin']==b
   slc <- df[bBool,]
@@ -182,6 +187,11 @@ dev.off()
 nrow(trunc)/nrow(df) # all data
 table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
 
+# end case where data are truncated to standard temperature range
+} else {
+  trunc <- df
+} 
+
 # * Clean -----------------------------------------------------------------
 
 # The last steps could introduce species with <6 occs.
@@ -241,7 +251,11 @@ getSamp <- function(bin, dat, binCol, cellCol){
 outL <- lapply(bins, getSamp, dat=trunc, binCol='bin', cellCol='cell_number')
 outDf <- do.call(rbind, outL)
 
-outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
+if (doTrunc){
+  outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_trunc_',day,'.csv')
+} else {
+  outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
+}
 write.csv(outDf, outNm, row.names = FALSE)
 
 # Simulate uniform niche spp ----------------------------------------------
@@ -249,7 +263,7 @@ write.csv(outDf, outNm, row.names = FALSE)
 df <- outDf 
 
 # if starting from top of script, run the following lines to jump in from here:
-  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200116.csv',stringsAsFactors=FALSE)
+  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200116.csv',stringsAsFactors=FALSE)
   # bins <- unique(df$bin)
   # day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
@@ -279,7 +293,11 @@ simOverbins <- function(b){
 simL <- lapply(bins, simOverbins)
 simDf <- do.call(rbind, simL)
 
-simNm <- paste0('Data/uniform_niche_sim_MAT_occs_latlong_8ka_',day,'.csv')
+if (doTrunc){
+  simNm <- paste0('Data/uniform_niche_sim_MAT_occs_latlong_8ka_trunc_',day,'.csv')
+} else {
+  simNm <- paste0('Data/uniform_niche_sim_MAT_occs_latlong_8ka_',day,'.csv')
+}
 write.csv(simDf, simNm, row.names=FALSE)
 
 # KDE niche summary -------------------------------------------------------
@@ -498,7 +516,12 @@ rawSumL <- lapply(spp, function(s){
   tempDf <- do.call(rbind, temp)
 })
 rawSum <- do.call(rbind, rawSumL)
-rawSumNm <- paste0('Data/foram_niche_sumry_metrics_raw_values_',day,'.csv')
+
+if (doTrunc){
+  rawSumNm <- paste0('Data/foram_niche_sumry_metrics_raw_values_trunc_',day,'.csv') 
+} else {
+  rawSumNm <- paste0('Data/foram_niche_sumry_metrics_raw_values_',day,'.csv')
+}
 write.csv(rawSum, rawSumNm, row.names=FALSE)
 
 rawSimL <- lapply(spp, function(s){
@@ -506,5 +529,10 @@ rawSimL <- lapply(spp, function(s){
   tempDf <- do.call(rbind, temp)
 })
 rawSim <- do.call(rbind, rawSimL)
-rawSimNm <- paste0('Data/uniform_niche_sim_sumry_metrics_raw_values_',day,'.csv')
+
+if (doTrunc){
+  rawSimNm <- paste0('Data/uniform_niche_sim_sumry_metrics_raw_values_trunc_',day,'.csv')
+} else {
+  rawSimNm <- paste0('Data/uniform_niche_sim_sumry_metrics_raw_values_',day,'.csv')
+}
 write.csv(rawSim, rawSimNm, row.names=FALSE)
