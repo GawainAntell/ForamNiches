@@ -58,7 +58,7 @@ row.names(occ) <- as.character(1:nrow(occ))
 # Combine enviro and spp data ---------------------------------------------
 
 envNm <- c('ann_temp_ym_dpth'
-           #'month_temp_range', 
+           #'month_temp_range',
            #'month_temp_max',
            #'month_temp_min',
            #'ann_otracer14_ym_dpth',
@@ -66,9 +66,31 @@ envNm <- c('ann_temp_ym_dpth'
            #'ann_salinity_ym_dpth',
            #'ann_W_ym_dpth'
 )
+envNmShort <- sapply(envNm, function(txt){
+  paste(strsplit(txt,'_')[[1]][2:3], collapse='_')
+}) 
+
 # Note: code below can deal with envNm that's a vector
 
 llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+# Extract at each of 4 depths: 0, 40, 78, 164 m
+# The lower 3 correspond to surface, surface-subsurface, and subsurface species.
+dpths <- c(1,4,6,8)
+# Compare with the Average Living Depth of species in the dataset:
+sppDat <- read.csv('Data/foram_spp_data_200108.csv', stringsAsFactors=FALSE)
+sameSpp <- sppDat$species %in% spp
+sppDat <- sppDat[sameSpp,]
+zones <- unique(sppDat$DepthHabitat)
+for (z in zones){
+ zBool <- sppDat$DepthHabitat==z
+ avg <- mean(sppDat$ALD[zBool])
+ avg <- round(avg)
+ print(paste(z, avg))
+}
+# [1] "Subsurface 164"
+# [1] "Surface.subsurface 93"
+# [1] "Surface 49"
 
 source('raster_brick_import_fcn.R')
 
@@ -78,14 +100,15 @@ addEnv <- function(bin, dat, binCol, cellCol, prj, envNm){
   slcCells <- slc[,cellCol]
   slcEnv <- getBrik(bin=bin, envNm=envNm, mods=modId)
   
-  for (env in envNm){
+  for (i in 1:length(envNm)){
+    env <- envNm[i]
     envVals <- raster::extract(slcEnv[[env]], slcCells)
     # Rows = points of extraction, columns = depth layers  
-    envVals <- envVals[,1]
-    env <- paste0(env,'_surface')
-    slc[,env] <- envVals
+    envVals <- envVals[,dpths]
+    nmOld <- envNmShort[i]
+    nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
+    slc[,nmNew] <- envVals
   } 
-  
   slc
 }
 
@@ -96,21 +119,44 @@ sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dop
   addEnv(bin=bin,envNm=envNm,dat=occ,binCol='bin',cellCol='cell_number',prj=llPrj)
 stopImplicitCluster()
 
+# * Env at preferred depth ------------------------------------------------
+
+habitatCol <- paste0(envNmShort, '_hab')
+sppEnv[,habitatCol] <- NA
+for (s in spp){
+  sRow <- sppDat$species==s
+  habitat <- sppDat$DepthHabitat[sRow]
+  if (habitat=='Surface'){
+    habNm <- paste0(envNmShort, '_surf')
+  }
+  if (habitat=='Surface.subsurface'){
+    habNm <- paste0(envNmShort, '_surfsub')
+  }
+  if (habitat=='Subsurface'){
+    habNm <- paste0(envNmShort, '_sub')
+  }
+  
+  sBool <- sppEnv$species==s
+  sppEnv[sBool, habitatCol] <- sppEnv[sBool, habNm]
+}
+
 # * Clean -----------------------------------------------------------------
 
 # remove records where environment is unknown
-envCol <- grep(envNm, colnames(sppEnv))
+envCol <- c(habitatCol, paste0(envNmShort, '_0m'))
 if (length(envCol)==1){
   naRows <- is.na(sppEnv[,envCol])
 } else {
-  test <- apply(sppEnv[,envCol], 1, function(r)
+  naRows <- apply(sppEnv[,envCol], 1, function(r)
     any(is.na(r))
   )
 }
 sppEnv <- sppEnv[!naRows,]
 
-df <- sppEnv[,c('species','bin','cell_number','centroid_long','centroid_lat','ann_temp_ym_dpth_surface')]
-colnames(df)[ncol(df)] <- 'mat'
+df <- sppEnv[,c('species','bin','cell_number','centroid_long','centroid_lat',envCol)]
+
+# inspect correlation between temperature at surface (0m) and near preferred depth
+cor(sppEnv$temp_ym_0m, sppEnv$temp_ym_hab)
 
 # Truncate to standard temp range -----------------------------------------
 
@@ -212,6 +258,7 @@ tossRows <- unlist(tossRowsL)
 trunc <- trunc[-tossRows,]
 
 # Also check for per-species continuity through time (at least 6 successive steps of 8ka)
+# This precludes 7 species and ~5% of occurrences from analysis
 keepSpp <- character()
 binL <- bins[2] - bins[1]
 enuf <- rep(binL, 6)
@@ -307,7 +354,7 @@ write.csv(simDf, simNm, row.names=FALSE)
 source('GSA_custom_ecospat_fcns.R')
 
 nbins <- length(bins)
-env <- 'mat'
+env <- 'temp_ym_hab'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
 # Resolution of the gridding of the climate space. Ecospat default is 100.
 # Note that when the value is higher, the density sum will be increasingly
@@ -501,10 +548,20 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
   if (length(slcRows)>0){
     slc <- dat[slcRows,]
     x <- slc[,traitCol]
-    m <- mean(x)
-    sd <- sd(x)
-    n <- length(x)
-    rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
+    if (length(traitCol)==1){
+      m <- mean(x)
+      sd <- sd(x)
+      n <- length(x)
+      rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
+    } else {
+      m <- apply(x, 2, mean)
+      sd <- apply(x, 2, sd)
+      n <- nrow(x)
+      rtrn <- data.frame(cbind(bin, t(m), t(sd), n))
+      colnames(rtrn) <- c('bin', paste0('m_', traitCol), paste0('sd_', traitCol), 'n')
+      rtrn$sp <- s
+    }
+    
   } else {
     rtrn <- data.frame()
   }
@@ -512,7 +569,7 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
 }
 
 rawSumL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol='mat')
+  temp <- lapply(bins, sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol=envCol)
   tempDf <- do.call(rbind, temp)
 })
 rawSum <- do.call(rbind, rawSumL)
@@ -525,7 +582,7 @@ if (doTrunc){
 write.csv(rawSum, rawSumNm, row.names=FALSE)
 
 rawSimL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=simDf, binCol='bin', sCol='species', traitCol='mat')
+  temp <- lapply(bins, sumup, s=s, dat=simDf, binCol='bin', sCol='species', traitCol=envCol)
   tempDf <- do.call(rbind, temp)
 })
 rawSim <- do.call(rbind, rawSimL)
