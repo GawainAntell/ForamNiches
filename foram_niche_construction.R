@@ -14,7 +14,7 @@ library(ecospat)
 library(ggplot2)
 
 # set whether or not to truncate to standard global temperature range
-doTrunc <- TRUE
+doTrunc <- FALSE
 
 # save names to put packages on all cores later
 pkgs <- c('sp','raster') 
@@ -169,7 +169,7 @@ minmax <- function(df, b, env){
   max <- max(slc[,env])
   c(b, mn, max)
 }
-sampSmryM <- sapply(bins, minmax, df=df, env='mat')
+sampSmryM <- sapply(bins, minmax, df=df, env='temp_ym_0m')
 sampSmry <- data.frame(t(sampSmryM))
 colnames(sampSmry) <- c('bin','min','max')
 uppr <- min(sampSmry$max)
@@ -193,8 +193,8 @@ outRows <- numeric()
 for (b in bins){
   bBool <- df$bin==b
   slc <- df[bBool,]
-  tooBig <- which(slc$mat > uppr)
-  tooSmol <- which(slc$mat < lwr)
+  tooBig <- which(slc$temp_ym_0m > uppr)
+  tooSmol <- which(slc$temp_ym_0m < lwr)
   out <- c(tooBig, tooSmol)
   if (length(out) > 0){
     slc <- slc[-out,]
@@ -206,8 +206,8 @@ for (b in bins){
 # * Evaluate degree of truncation -----------------------------------------
 
 df$trunc <- 'in range'
-tooBig <- which(df$mat > uppr)
-tooSmol <- which(df$mat < lwr)
+tooBig <- which(df$temp_ym_0m > uppr)
+tooSmol <- which(df$temp_ym_0m < lwr)
 df$trunc[tooBig] <- 'high'
 df$trunc[tooSmol] <- 'low'
 
@@ -238,7 +238,7 @@ table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
   trunc <- df
 } 
 
-# * Clean -----------------------------------------------------------------
+# Clean -------------------------------------------------------------------
 
 # The last steps could introduce species with <6 occs.
 # Subset again such that each sp has >5 occs per bin.
@@ -347,7 +347,7 @@ if (doTrunc){
 }
 write.csv(simDf, simNm, row.names=FALSE)
 
-# KDE niche summary -------------------------------------------------------
+# Niche summary -----------------------------------------------------------
 
 # * Data prep -------------------------------------------------------------
 
@@ -356,12 +356,6 @@ source('GSA_custom_ecospat_fcns.R')
 nbins <- length(bins)
 env <- 'temp_ym_hab'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
-# Resolution of the gridding of the climate space. Ecospat default is 100.
-# Note that when the value is higher, the density sum will be increasingly
-# larger than unity. Possible reason (?): R interpolates between discrete points
-# using a trapezoid. This overestimates the integral in concave-up curves,
-# which are the tails of the niche distributions.
-# (https://commons.wikimedia.org/w/index.php?curid=8541370)
 R <- 2^10
 
 # Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
@@ -394,14 +388,31 @@ nicher <- function(dat, b1, b2, sp, env, h.method){
   
   # the species may be absent in one or both bins, in which case z is an empty list
   if (length(z1)==0){
-    data.frame(bin=NA, sp=NA, n=NA, d=NA, pa=NA, pe=NA, tol=NA)
+  #  data.frame(bin=NA, sp=NA, n=NA, d=NA, pa=NA, pe=NA, tol=NA)
+    data.frame(bin=NA, sp=NA, n=NA, 
+               b=NA, h=NA, 
+               dinterps=NA, dtrap=NA,
+               pa=NA, pe=NA, tol=NA)
+    
   } else {
     n <- length(sp1rows)
     if (length(z2)==0){
-      data.frame(bin=b1, sp=sp, n=n, d=NA, pa=z1$pa, pe=z1$pe, tol=z1$t)
+   #   data.frame(bin=b1, sp=sp, n=n, d=NA, pa=z1$pa, pe=z1$pe, tol=z1$t)
+      data.frame(bin=b1, sp=sp, n=n, 
+                 b=NA, h=NA, 
+                 dinterps=NA, dtrap=NA,
+                 pa=z1$pa, pe=z1$pe, tol=z1$t)
     } else{
-      ovrlp <- GSA.ecospat.niche.overlap(z1, z2, cor=FALSE)
-      data.frame(bin=b1, sp=sp, n=n, d=ovrlp, pa=z1$pa, pe=z1$pe, tol=z1$t)
+   #   ovrlp <- GSA.ecospat.niche.overlap(z1, z2, cor=FALSE)
+      dinterps <- d1(z1, z2) 
+      dtrap <- d2(z1, z2) 
+      h <- hinv(z1, z2) 
+      b <- bc(z1, z2)
+   #   data.frame(bin=b1, sp=sp, n=n, d=ovrlp, pa=z1$pa, pe=z1$pe, tol=z1$t)
+      data.frame(bin=b1, sp=sp, n=n, 
+                 b, h, 
+                 dinterps, dtrap, 
+                 pa=z1$pa, pe=z1$pe, tol=z1$t)
     }
   }
 }
