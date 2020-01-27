@@ -356,10 +356,10 @@ source('GSA_custom_ecospat_fcns.R')
 nbins <- length(bins)
 env <- 'temp_ym_hab'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
-R <- 2^10
+R <- 2^8
 
 # Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
-nicher <- function(dat, b1, b2, sp, env, h.method){
+nicher <- function(dat, b1, b2, sp, env, R, h.method){
   
   globBool <- dat$species=='sampled'
   glob <- dat[globBool,env]
@@ -390,8 +390,9 @@ nicher <- function(dat, b1, b2, sp, env, h.method){
   if (length(z1)==0){
   #  data.frame(bin=NA, sp=NA, n=NA, d=NA, pa=NA, pe=NA, tol=NA)
     data.frame(bin=NA, sp=NA, n=NA, 
-               b=NA, h=NA, 
-               dinterps=NA, dtrap=NA,
+               errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
+   #            b=NA, h=NA, 
+    #           dinterps=NA, dtrap=NA,
                pa=NA, pe=NA, tol=NA)
     
   } else {
@@ -399,19 +400,22 @@ nicher <- function(dat, b1, b2, sp, env, h.method){
     if (length(z2)==0){
    #   data.frame(bin=b1, sp=sp, n=n, d=NA, pa=z1$pa, pe=z1$pe, tol=z1$t)
       data.frame(bin=b1, sp=sp, n=n, 
-                 b=NA, h=NA, 
-                 dinterps=NA, dtrap=NA,
+                 errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
+  #               b=NA, h=NA, 
+  #               dinterps=NA, dtrap=NA,
                  pa=z1$pa, pe=z1$pe, tol=z1$t)
     } else{
+      err <- data.frame(sumErr(z1, z2))
    #   ovrlp <- GSA.ecospat.niche.overlap(z1, z2, cor=FALSE)
-      dinterps <- d1(z1, z2) 
-      dtrap <- d2(z1, z2) 
-      h <- hinv(z1, z2) 
-      b <- bc(z1, z2)
+   #   dinterps <- d1(z1, z2) 
+  #    dtrap <- d2(z1, z2) 
+  #    h <- hinv(z1, z2) 
+  #    b <- bc(z1, z2)
    #   data.frame(bin=b1, sp=sp, n=n, d=ovrlp, pa=z1$pa, pe=z1$pe, tol=z1$t)
       data.frame(bin=b1, sp=sp, n=n, 
-                 b, h, 
-                 dinterps, dtrap, 
+                 err,
+  #               b, h, 
+  #               dinterps, dtrap, 
                  pa=z1$pa, pe=z1$pe, tol=z1$t)
     }
   }
@@ -427,7 +431,7 @@ bPairs <- rbind(recent, bPairs)
 
 nichL <- lapply(spp, function(s){
   l <- apply(bPairs, 1, function(x){
-    nicher(dat=df, b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
+    nicher(dat=df, b1=x[1], b2=x[2], sp=s, env=env, R=R, h.method=h.method)
   })
   do.call(rbind, l)
 })
