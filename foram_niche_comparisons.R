@@ -12,8 +12,8 @@ library(gridExtra)
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-#df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_trunc_200116.csv", stringsAsFactors=FALSE)
-df <- read.csv("Data/foram_niche_sumry_metrics_raw_values_200122.csv", stringsAsFactors=FALSE)
+#df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200127.csv", stringsAsFactors=FALSE)
+df <- read.csv("Data/foram_niche_sumry_metrics_200127.csv", stringsAsFactors=FALSE)
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
 
@@ -68,7 +68,7 @@ nich <- splitSpp[keepBool,]
 
 # calculate mean absolute latitude at sampling points
 #allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200116.csv')
-allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200122.csv')
+allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200127.csv')
 allSampBool <- allPts$species=='sampled'
 allSamp <- allPts[allSampBool,]
 absLat <- sapply(bins, function(b){
@@ -86,7 +86,7 @@ globMean <- colMeans(glob[,cols])
 # combine with sampling n and mean MAT
 sampBool <- nich$sp=='sampled1'
 samp <- nich[sampBool,]
-sampMean <- samp$m
+sampMean <- samp$m_temp_ym_0m
 logSampN <- log(samp$n)
 
 # no autocorrelation in residuals of main relationship of interest
@@ -124,9 +124,12 @@ evoFit <- function(s){
   l <- nrow(sp)
   strt <- sp$bin[1]
   
-  ts <- as.paleoTS(mm = sp$m, vv = sp$sd^2, nn = sp$n, tt = sp$scaledT, 
+  ts <- as.paleoTS(mm = sp$m_temp_ym_hab, vv = sp$sd_temp_ym_hab^2, 
+                 # mm = sp$m_temp_ym_0m, vv = sp$sd_temp_ym_0m^2,  
+                   nn = sp$n, tt = sp$scaledT, 
                    oldest = 'first', reset.time = FALSE)
-  tsSamp <- as.paleoTS(mm = samp$m, vv = samp$sd^2, nn = samp$n, tt = samp$scaledT, 
+  tsSamp <- as.paleoTS(mm = samp$m_temp_ym_0m, vv = samp$sd_temp_ym_0m^2, 
+                       nn = samp$n, tt = samp$scaledT, 
                        oldest = 'first', reset.time = FALSE)
   
   if (l < 14){
@@ -161,13 +164,10 @@ evoFit <- function(s){
   out
 }
 
-# save package names to put  on all cores
-pkgs <- c('paleoTS') 
-
 pt1 <- proc.time()
 ncores <- detectCores() - 1
 registerDoParallel(ncores)
-  mods <- foreach(s=longSpp, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% evoFit(s)
+  mods <- foreach(s=longSpp, .packages='paleoTS', .combine=rbind, .inorder=FALSE) %dopar% evoFit(s)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
@@ -179,7 +179,8 @@ table(mods$bestMod)
 
 # ages must start at 0
 samp$scaledT <- 1:nrow(samp) -1
-ts <- as.paleoTS(mm = samp$m, vv = samp$sd^2, nn = samp$n, tt = samp$scaledT, 
+ts <- as.paleoTS(mm = samp$m_temp_ym_0m, vv = samp$sd_temp_ym_0m^2, 
+                 nn = samp$n, tt = samp$scaledT, 
                  oldest = 'first', reset.time = FALSE)
 sampMods <- fit9models(ts, method='Joint', silent=TRUE)
 sampMods
@@ -208,7 +209,7 @@ bubbl <-
   scale_x_discrete(name = 'Sampling model', drop=FALSE) +
   scale_y_discrete(name = 'Species model', drop=FALSE) +
   theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5)) +
-  scale_size(range=c(2,10))
+  scale_size(range=c(2,10), breaks = c(1,3,5,7,9))
 
 bubblNm <- paste0('Figs/evo_mode_bubble_matrix_', day, '.pdf')
 pdf(bubblNm, width=5, height=4.4)
@@ -246,13 +247,13 @@ dev.off()
 
 # * Inter-spp niche overlap -----------------------------------------------
 
-pairD <- read.csv('Data/foram_species_pairs_KDE_D_200116.csv', stringsAsFactors=FALSE)
+pairD <- read.csv('Data/foram_species_pairs_KDE_H_200127.csv', stringsAsFactors=FALSE)
 # Watch out - not normally distributed because of bounds at 0 and 1.
 # But some values = 1 do occur, so can't do logit transformation.
 
 pairD$bin <- factor(pairD$bin, levels = bins)
 inter <- 
-  ggplot(data=pairD, aes(x=bin, y=d)) +
+  ggplot(data=pairD, aes(x=bin, y=h)) +
   scale_y_continuous(limits=c(0,1.05), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=6),
@@ -261,18 +262,17 @@ inter <-
 
 # * Intra-sp niche overlap ------------------------------------------------
 
-kdeFull <- read.csv("Data/foram_niche_sumry_metrics_KDE_200116.csv", stringsAsFactors=FALSE)
-kdeKeep <- kdeFull$sp != 'sampled'
-kde <- kdeFull[kdeKeep,]
-consec <- ! is.na(kde$d)
-kde <- kde[consec,]
-kde$shortNm <- sapply(kde$sp, function(txt){
+keep <- nich$sp != 'sampled1'
+intraH <- nich[keep,]
+consec <- ! is.na(intraH$h)
+intraH <- intraH[consec,]
+intraH$shortNm <- sapply(intraH$sp, function(txt){
   splt <- strsplit(txt, ' ')
   splt[[1]][2]
 } )
 
 intra <- 
-  ggplot(data=kde, aes(x=shortNm, y=d)) +
+  ggplot(data=intraH, aes(x=shortNm, y=h)) +
   scale_y_continuous(limits=c(0,1.05), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
@@ -280,10 +280,10 @@ intra <-
         axis.text.y = element_blank(),
         axis.title.y = element_blank())
 
-y.grob <- textGrob('Schoener\'s D overlap', gp=gpar(fontface='bold', fontsize=15), rot=90)
+y.grob <- textGrob('Hellinger\'s D distance', gp=gpar(fontface='bold', fontsize=15), rot=90)
 doubl <- plot_grid(inter, intra, nrow=1, align='h', rel_widths = c(1,0.35))
 
-ovrlpNm <- paste0('Figs/overlap_D_boxplots_inter_vs_intraspecific',day,'.pdf')
+ovrlpNm <- paste0('Figs/overlap_H_boxplots_inter_vs_intraspecific',day,'.pdf')
 pdf(ovrlpNm, width=9, height=5)
 grid.arrange(arrangeGrob(doubl, left = y.grob))
 dev.off()
@@ -292,16 +292,16 @@ dev.off()
 realSpp <- setdiff(spp, 'sampled')
 nReal <- length(realSpp)
 optCor <- function(s, dat){
-  spBool <- dat$sp==s
-  sDat <- dat[spBool,]
+  spRows <- grep(s, dat$sp)
+  sDat <- dat[spRows,]
   bNms <- paste0('X',sDat$bin)
   gDat <- globMean[bNms]
   cor(gDat, sDat$pe, method='spear')
 }
 
-corsReal <- sapply(realSpp, optCor, dat=kdeFull)
+corsReal <- sapply(realSpp, optCor, dat=nich)
 
-kdeSim <- read.csv("Data/uniform_niche_sim_sumry_metrics_KDE_200117.csv", stringsAsFactors=FALSE)
+kdeSim <- read.csv("Data/uniform_niche_sim_sumry_metrics_200127.csv", stringsAsFactors=FALSE)
 corsSim <- sapply(realSpp, optCor, dat=kdeSim)
 
 trt <- c(rep('real species',nReal), rep('simulated neutral niche',nReal))
