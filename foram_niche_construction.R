@@ -346,14 +346,14 @@ write.csv(simDf, simNm, row.names=FALSE)
 
 # Niche summary -----------------------------------------------------------
 
-# * Data prep -------------------------------------------------------------
-
 source('GSA_custom_ecospat_fcns.R')
 
 nbins <- length(bins)
 env <- 'temp_ym_hab'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
 R <- 2^8
+
+# * KDE niche summary -----------------------------------------------------
 
 # Output niche overlap (though time), peak abundance, preferred enviro, & tolerance
 nicher <- function(dat, b1, b2, sp, env, R, h.method){
@@ -417,9 +417,6 @@ nich <- do.call(rbind, nichL)
 nas <- is.na(nich$bin)
 nich <- nich[!nas,]
 
-dfNm <- paste0('Data/foram_niche_sumry_metrics_KDE_',day,'.csv')
-write.csv(nich, dfNm, row.names=FALSE)
-
 simNichL <- lapply(spp, function(s){
   l <- apply(bPairs, 1, function(x){
     nicher(dat=simDf, b1=x[1], b2=x[2], sp=s, env=env, R=R, h.method=h.method)
@@ -429,10 +426,64 @@ simNichL <- lapply(spp, function(s){
 simNich <- do.call(rbind, simNichL)
 simNas <- is.na(simNich$bin)
 simNich <- simNich[!simNas,]
-simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_KDE_',day,'.csv')
-write.csv(simNich, simNm, row.names=FALSE)
 
-# * Inter-specific overlap ------------------------------------------------
+# * Non-KDE niche summary -------------------------------------------------
+
+# Need mean, variance, sample size, and age of trait values (MAT) for each sp & bin
+sumup <- function(bin, s, dat, binCol, sCol, traitCol){
+  slcRows <- which(dat[,binCol] == bin & dat[,sCol] == s)
+  if (length(slcRows)>0){
+    slc <- dat[slcRows,]
+    x <- slc[,traitCol]
+    if (length(traitCol)==1){
+      m <- mean(x)
+      sd <- sd(x)
+      n <- length(x)
+      rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
+    } else {
+      m <- apply(x, 2, mean)
+      sd <- apply(x, 2, sd)
+      n <- nrow(x)
+      rtrn <- data.frame(cbind(bin, t(m), t(sd), n))
+      colnames(rtrn) <- c('bin', paste0('m_', traitCol), paste0('sd_', traitCol), 'n')
+      rtrn$sp <- s
+    }
+    
+  } else {
+    rtrn <- data.frame()
+  }
+  return(rtrn)
+}
+
+rawSumL <- lapply(spp, function(s){
+  temp <- lapply(bins, sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol=envCol)
+  tempDf <- do.call(rbind, temp)
+})
+rawSum <- do.call(rbind, rawSumL)
+
+# combine KDE and raw-scale summary/sample statistics into one output file
+fullSum <- merge(nich, rawSum)
+if (doTrunc){
+  sumNm <- paste0('Data/foram_niche_sumry_metrics_trunc_',day,'.csv') 
+} else {
+  sumNm <- paste0('Data/foram_niche_sumry_metrics_',day,'.csv')
+}
+write.csv(fullSum, sumNm, row.names=FALSE)
+
+rawSimL <- lapply(spp, function(s){
+  temp <- lapply(bins, sumup, s=s, dat=simDf, binCol='bin', sCol='species', traitCol=envCol)
+  tempDf <- do.call(rbind, temp)
+})
+rawSim <- do.call(rbind, rawSimL)
+fullSim <- merge(simNich, rawSim)
+if (doTrunc){
+  simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_trunc_',day,'.csv')
+} else {
+  simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_',day,'.csv')
+}
+write.csv(fullSim, simNm, row.names=FALSE)
+
+# Inter-specific overlap --------------------------------------------------
 
 interSppD <- function(b, df, env, R, h.method){
   xmax <- max(df[,env])
@@ -477,57 +528,3 @@ interSim <- foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE
 stopImplicitCluster()
 interSimNm <- paste0('Data/uniform_niche_sim_pairs_KDE_H_', day, '.csv')
 write.csv(interSim, interSimNm, row.names=FALSE)
-
-# Raw value niche summary -------------------------------------------------
-
-# Need mean, variance, sample size, and age of trait values (MAT) for each sp & bin
-sumup <- function(bin, s, dat, binCol, sCol, traitCol){
-  slcRows <- which(dat[,binCol] == bin & dat[,sCol] == s)
-  if (length(slcRows)>0){
-    slc <- dat[slcRows,]
-    x <- slc[,traitCol]
-    if (length(traitCol)==1){
-      m <- mean(x)
-      sd <- sd(x)
-      n <- length(x)
-      rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
-    } else {
-      m <- apply(x, 2, mean)
-      sd <- apply(x, 2, sd)
-      n <- nrow(x)
-      rtrn <- data.frame(cbind(bin, t(m), t(sd), n))
-      colnames(rtrn) <- c('bin', paste0('m_', traitCol), paste0('sd_', traitCol), 'n')
-      rtrn$sp <- s
-    }
-    
-  } else {
-    rtrn <- data.frame()
-  }
-  return(rtrn)
-}
-
-rawSumL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol=envCol)
-  tempDf <- do.call(rbind, temp)
-})
-rawSum <- do.call(rbind, rawSumL)
-
-if (doTrunc){
-  rawSumNm <- paste0('Data/foram_niche_sumry_metrics_raw_values_trunc_',day,'.csv') 
-} else {
-  rawSumNm <- paste0('Data/foram_niche_sumry_metrics_raw_values_',day,'.csv')
-}
-write.csv(rawSum, rawSumNm, row.names=FALSE)
-
-rawSimL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=simDf, binCol='bin', sCol='species', traitCol=envCol)
-  tempDf <- do.call(rbind, temp)
-})
-rawSim <- do.call(rbind, rawSimL)
-
-if (doTrunc){
-  rawSimNm <- paste0('Data/uniform_niche_sim_sumry_metrics_raw_values_trunc_',day,'.csv')
-} else {
-  rawSimNm <- paste0('Data/uniform_niche_sim_sumry_metrics_raw_values_',day,'.csv')
-}
-write.csv(rawSim, rawSimNm, row.names=FALSE)
