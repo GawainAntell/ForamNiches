@@ -307,7 +307,7 @@ write.csv(outDf, outNm, row.names = FALSE)
 df <- outDf 
 
 # if starting from top of script, run the following lines to jump in from here:
-  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200116.csv',stringsAsFactors=FALSE)
+  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200127.csv',stringsAsFactors=FALSE)
   # bins <- unique(df$bin)
   # day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
@@ -330,11 +330,11 @@ simNiche <- function(s, b, dat, sCol, bCol, samp){
   }
 }
 
-simOverbins <- function(b){
+simOverBins <- function(b){
   simL <- lapply(spp, b=b, simNiche, dat=df, sCol='species', bCol='bin', samp=samp)
   simDf <- do.call(rbind, simL)
 }
-simL <- lapply(bins, simOverbins)
+simL <- lapply(bins, simOverBins)
 simDf <- do.call(rbind, simL)
 
 if (doTrunc){
@@ -433,13 +433,10 @@ simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_KDE_',day,'.csv')
 write.csv(simNich, simNm, row.names=FALSE)
 
 # * Inter-specific overlap ------------------------------------------------
-# TODO: update this for the revised KDE functions
-interSppD <- function(b, df, R, h.method){
-  globBool <- df$species=='sampled'
-  glob <- df[globBool,env]
-  
-  glob1rows <- which(df$species=='sampled' & df$bin==b)
-  glob1 <- df[glob1rows,env]
+
+interSppD <- function(b, df, env, R, h.method){
+  xmax <- max(df[,env])
+  xmin <- min(df[,env])
   
   bSppRows <- which(df$species!='sampled' & df$bin==b)
   bSpp <- unique(df$species[bSppRows])
@@ -448,32 +445,37 @@ interSppD <- function(b, df, R, h.method){
   kdeL <- lapply(bSpp, function(s){
     spRows <- which(df$species==s & df$bin==b)
     sp1 <- df[spRows,env]
-    z <- GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0, h.method=h.method)
+    z <- kdeNiche(sp1, xmax=xmax, xmin=xmin, R=R, h.method=h.method)
   }
   )
   names(kdeL) <- bSpp
   
-  # Compute Schoener's D for all species pairs
+  # Compute Hellinger's H for all species pairs
   fin <- data.frame()
   for (s1 in bSpp){
     for (s2 in bSpp){
       if (s1==s2) {next} else{
-        d <- GSA.ecospat.niche.overlap(kdeL[[s1]], kdeL[[s2]], cor=FALSE)
-        pairDat <- data.frame(bin=b, sp1=s1, sp2=s2, d=d)
+        h <- hell(kdeL[[s1]], kdeL[[s2]])
+        pairDat <- data.frame(bin=b, sp1=s1, sp2=s2, h=h)
         fin <- rbind(fin, pairDat)
       }
     }
   }
   fin
 }
-interSppL <- lapply(bins, interSppD, df=df, R=R, h.method=h.method)
-interSppDf <- do.call(rbind, interSppL)
-interSppNm <- paste0('Data/foram_species_pairs_KDE_D_', day, '.csv')
+
+registerDoParallel(ncores)
+interSppDf <- foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar%
+  interSppD(b=bin, df=df, env=env, R=R, h.method=h.method)
+stopImplicitCluster()
+interSppNm <- paste0('Data/foram_species_pairs_KDE_H_', day, '.csv')
 write.csv(interSppDf, interSppNm, row.names=FALSE)
 
-interSimL <- lapply(bins, interSppD, df=simDf, R=R, h.method=h.method)
-interSim <- do.call(rbind, interSimL)
-interSimNm <- paste0('Data/uniform_niche_sim_pairs_KDE_D_', day, '.csv')
+registerDoParallel(ncores)
+interSim <- foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar%
+  interSppD(b=bin, df=simDf, env=env, R=R, h.method=h.method)
+stopImplicitCluster()
+interSimNm <- paste0('Data/uniform_niche_sim_pairs_KDE_H_', day, '.csv')
 write.csv(interSim, interSimNm, row.names=FALSE)
 
 # Raw value niche summary -------------------------------------------------
