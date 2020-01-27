@@ -8,9 +8,6 @@ library(foreach)
 library(iterators)
 library(doParallel)
 library(PBSmapping)
-library(adehabitatMA)
-library(adehabitatHR)
-library(ecospat)
 library(ggplot2)
 
 # set whether or not to truncate to standard global temperature range
@@ -358,17 +355,10 @@ env <- 'temp_ym_hab'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
 R <- 2^8
 
-# Calculate niche overlap (Schoener's D), peak abundance, preferred enviro, & tolerance
+# Output niche overlap (though time), peak abundance, preferred enviro, & tolerance
 nicher <- function(dat, b1, b2, sp, env, R, h.method){
-  
-  globBool <- dat$species=='sampled'
-  glob <- dat[globBool,env]
-  
-  glob1rows <- which(dat$species=='sampled' & dat$bin==b1)
-  glob1 <- dat[glob1rows,env]
-  
-  glob2rows <- which(dat$species=='sampled' & dat$bin==b2)
-  glob2 <- dat[glob2rows,env]
+  xmin <- min(dat[,env])
+  xmax <- max(dat[,env])
   
   sp1rows <- which(dat$species==sp & dat$bin==b1)
   sp1 <- dat[sp1rows,env]
@@ -378,44 +368,31 @@ nicher <- function(dat, b1, b2, sp, env, R, h.method){
   
   # for each species at time i and i+1
   z1 <- tryCatch(
-    GSA.grid.clim.dyn(glob, glob1, sp1, R, th.sp=0, th.env=0, h.method=h.method),
+    kdeNiche(sp=sp1, xmax=xmax, xmin=xmin, R=R, h.method=h.method),
     error = function(err){ list() }
   ) 
   z2 <- tryCatch(
-    GSA.grid.clim.dyn(glob, glob2, sp2, R, th.sp=0, th.env=0, h.method=h.method),
+    kdeNiche(sp=sp2, xmax=xmax, xmin=xmin, R=R, h.method=h.method),
     error = function(err){ list() }
   ) 
   
   # the species may be absent in one or both bins, in which case z is an empty list
   if (length(z1)==0){
-  #  data.frame(bin=NA, sp=NA, n=NA, d=NA, pa=NA, pe=NA, tol=NA)
-    data.frame(bin=NA, sp=NA, n=NA, 
-               errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
-   #            b=NA, h=NA, 
-    #           dinterps=NA, dtrap=NA,
+    data.frame(bin=NA, sp=NA, n=NA, h=NA,
+  #             errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
                pa=NA, pe=NA, tol=NA)
     
   } else {
     n <- length(sp1rows)
     if (length(z2)==0){
-   #   data.frame(bin=b1, sp=sp, n=n, d=NA, pa=z1$pa, pe=z1$pe, tol=z1$t)
-      data.frame(bin=b1, sp=sp, n=n, 
-                 errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
-  #               b=NA, h=NA, 
-  #               dinterps=NA, dtrap=NA,
+      data.frame(bin=b1, sp=sp, n=n, h=NA,
+  #               errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
                  pa=z1$pa, pe=z1$pe, tol=z1$t)
     } else{
-      err <- data.frame(sumErr(z1, z2))
-   #   ovrlp <- GSA.ecospat.niche.overlap(z1, z2, cor=FALSE)
-   #   dinterps <- d1(z1, z2) 
-  #    dtrap <- d2(z1, z2) 
-  #    h <- hinv(z1, z2) 
-  #    b <- bc(z1, z2)
-   #   data.frame(bin=b1, sp=sp, n=n, d=ovrlp, pa=z1$pa, pe=z1$pe, tol=z1$t)
-      data.frame(bin=b1, sp=sp, n=n, 
-                 err,
-  #               b, h, 
-  #               dinterps, dtrap, 
+   #   err <- data.frame(sumErr(z1, z2))
+      h <- hell(z1, z2) 
+      data.frame(bin=b1, sp=sp, n=n, h=h,
+             #    err,
                  pa=z1$pa, pe=z1$pe, tol=z1$t)
     }
   }
@@ -445,7 +422,7 @@ write.csv(nich, dfNm, row.names=FALSE)
 
 simNichL <- lapply(spp, function(s){
   l <- apply(bPairs, 1, function(x){
-    nicher(dat=simDf, b1=x[1], b2=x[2], sp=s, env=env, h.method=h.method)
+    nicher(dat=simDf, b1=x[1], b2=x[2], sp=s, env=env, R=R, h.method=h.method)
   })
   do.call(rbind, l)
 })
@@ -455,64 +432,8 @@ simNich <- simNich[!simNas,]
 simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_KDE_',day,'.csv')
 write.csv(simNich, simNm, row.names=FALSE)
 
-# * Example KDE plots -----------------------------------------------------
-
-s <- 'Neogloboquadrina pachyderma'
-b1 <- 204
-b2 <- 404
-
-globBool <- df$species=='sampled'
-glob <- df[globBool,env]
-glob <- as.matrix(glob)
-
-xmax <- max(glob[, 1])
-xmin <- min(glob[, 1])
-x <- seq(from = min(glob[, 1]), to = max(glob[, 1]), 
-         length.out = R)
-
-sp1rows <- which(df$species==s & df$bin==b1)
-sp1 <- df[sp1rows,env]
-sp1 <- as.matrix(sp1)
-
-sp2rows <- which(df$species==s & df$bin==b2)
-sp2 <- df[sp2rows,env]
-sp2 <- as.matrix(sp2)
-
-sp1dens <- density(sp1[, 1], 
-                   kernel = "gaussian", 
-                   bw=h.method,
-                   n = R, 
-                   cut = 3
-)
-sp2dens <- density(sp2[, 1], 
-                   kernel = "gaussian", 
-                   bw=h.method,
-                   n = R, 
-                   cut = 3
-)
-
-p1nm <- paste0('Figs/KDE_Npachyderma_', b1, 'ka_', day, '.pdf')
-pdf(p1nm, width=5, height=5)
-  plot(sp1dens, xlim=c(xmin-6, xmax+6), main=paste(b1, 'ka,', s))
-  rug(sp1[,1])
-  polygon(sp1dens$x, sp1dens$y, col='orange')
-dev.off()
-
-p2nm <- paste0('Figs/KDE_Npachyderma_', b2, 'ka_', day, '.pdf')
-pdf(p2nm, width=5, height=5)
-  plot(sp2dens, xlim=c(xmin-6, xmax+6), main=paste(b2, 'ka,', s))
-  rug(sp2[,1])
-  polygon(sp2dens$x, sp2dens$y, col='orange')
-dev.off()
-
-p1 <- as.matrix(sp1dens$y)/sum(as.matrix(sp1dens$y))
-p2 <- as.matrix(sp2dens$y)/sum(as.matrix(sp2dens$y))
-absDiff <- abs(p1 - p2)
-D <- 1 - (0.5 * (sum(absDiff)))
-D
-
 # * Inter-specific overlap ------------------------------------------------
-
+# TODO: update this for the revised KDE functions
 interSppD <- function(b, df, R, h.method){
   globBool <- df$species=='sampled'
   glob <- df[globBool,env]
