@@ -247,14 +247,13 @@ dev.off()
 
 # * Inter-spp niche overlap -----------------------------------------------
 
-pairD <- read.csv('Data/foram_species_pairs_KDE_H_200127.csv', stringsAsFactors=FALSE)
+pairH <- read.csv('Data/foram_species_pairs_KDE_H_200127.csv', stringsAsFactors=FALSE)
 # Watch out - not normally distributed because of bounds at 0 and 1.
-# But some values = 1 do occur, so can't do logit transformation.
 
-pairD$bin <- factor(pairD$bin, levels = bins)
+pairH$bin <- factor(pairD$bin, levels = bins)
 inter <- 
-  ggplot(data=pairD, aes(x=bin, y=h)) +
-  scale_y_continuous(limits=c(0,1.05), expand=c(0,0)) + 
+  ggplot(data=pairH, aes(x=bin, y=h)) +
+  scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=6),
         axis.title.x = element_blank(),
@@ -262,8 +261,8 @@ inter <-
 
 # * Intra-sp niche overlap ------------------------------------------------
 
-keep <- nich$sp != 'sampled1'
-intraH <- nich[keep,]
+keep <- df$sp != 'sampled'
+intraH <- df[keep,]
 consec <- ! is.na(intraH$h)
 intraH <- intraH[consec,]
 intraH$shortNm <- sapply(intraH$sp, function(txt){
@@ -273,14 +272,14 @@ intraH$shortNm <- sapply(intraH$sp, function(txt){
 
 intra <- 
   ggplot(data=intraH, aes(x=shortNm, y=h)) +
-  scale_y_continuous(limits=c(0,1.05), expand=c(0,0)) + 
+  scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
         axis.title.x = element_blank(),
         axis.text.y = element_blank(),
         axis.title.y = element_blank())
 
-y.grob <- textGrob('Hellinger\'s D distance', gp=gpar(fontface='bold', fontsize=15), rot=90)
+y.grob <- textGrob('Hellinger\'s H distance', gp=gpar(fontface='bold', fontsize=15), rot=90)
 doubl <- plot_grid(inter, intra, nrow=1, align='h', rel_widths = c(1,0.35))
 
 ovrlpNm <- paste0('Figs/overlap_H_boxplots_inter_vs_intraspecific',day,'.pdf')
