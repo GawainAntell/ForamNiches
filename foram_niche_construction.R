@@ -7,14 +7,12 @@ library(parallel)
 library(foreach)
 library(iterators)
 library(doParallel)
-library(PBSmapping)
+#library(PBSmapping)
 library(ggplot2)
+library(tidyr)
 
 # set whether or not to truncate to standard global temperature range
 doTrunc <- FALSE
-
-# save names to put packages on all cores later
-pkgs <- c('sp','raster') 
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
@@ -109,6 +107,7 @@ addEnv <- function(bin, dat, binCol, cellCol, prj, envNm){
   slc
 }
 
+pkgs <- c('sp','raster') 
 # Fast enough (1 min) this could be done in a loop/lapply rather than parallel
 ncores <- detectCores() - 1
 registerDoParallel(ncores)
@@ -150,10 +149,12 @@ if (length(envCol)==1){
 }
 sppEnv <- sppEnv[!naRows,]
 
-df <- sppEnv[,c('species','bin','cell_number','centroid_long','centroid_lat',envCol)]
+allEnvCols <- c(paste(envNmShort, c('surf','surfsub','sub'), sep='_'), envCol)
+df <- sppEnv[,c('species','bin','cell_number','centroid_long','centroid_lat',allEnvCols)]
 
 # inspect correlation between temperature at surface (0m) and near preferred depth
 cor(sppEnv$temp_ym_0m, sppEnv$temp_ym_hab)
+# [1] 0.9597868
 
 # Truncate to standard temp range -----------------------------------------
 
@@ -254,7 +255,8 @@ tossRowsL <-
 tossRows <- unlist(tossRowsL)
 trunc <- trunc[-tossRows,]
 
-# Also check for per-species continuity through time (at least 6 successive steps of 8ka)
+# Also check for per-species continuity through time 
+# (at least 6 successive steps of 8ka)
 # This precludes 7 species and ~5% of occurrences from analysis
 keepSpp <- character()
 binL <- bins[2] - bins[1]
@@ -307,7 +309,7 @@ write.csv(outDf, outNm, row.names = FALSE)
 df <- outDf 
 
 # if starting from top of script, run the following lines to jump in from here:
-  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200127.csv',stringsAsFactors=FALSE)
+  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv',stringsAsFactors=FALSE)
   # bins <- unique(df$bin)
   # day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
@@ -349,7 +351,6 @@ write.csv(simDf, simNm, row.names=FALSE)
 source('GSA_custom_ecospat_fcns.R')
 
 nbins <- length(bins)
-env <- 'temp_ym_hab'
 h.method <- "nrd0" # "SJ-ste" # "ucv"
 R <- 2^8
 
@@ -406,26 +407,29 @@ bPairs <- cbind(bins[-1], bins[-length(bins)])
 recent <- cbind(4, NA)
 bPairs <- rbind(recent, bPairs)
 
-nichL <- lapply(spp, function(s){
-  l <- apply(bPairs, 1, function(x){
-    nicher(dat=df, b1=x[1], b2=x[2], sp=s, env=env, R=R, h.method=h.method)
+# loop over time bins over species over environmental variables
+kdeLoop <- function(e,dat){
+  sList <- lapply(spp, function(s){
+    bList <- apply(bPairs, 1, function(x){
+      nicher(dat=dat, b1=x[1], b2=x[2], sp=s, env=envCol, R=R, h.method=h.method)
+    })
+    do.call(rbind, bList)
   })
-  do.call(rbind, l)
-})
-nich <- do.call(rbind, nichL)
-# remove NA rows (if a species is not sampled in the focal bin)
-nas <- is.na(nich$bin)
-nich <- nich[!nas,]
+  sDf <- do.call(rbind, sList)
+  # remove NA rows (if a species is not sampled in the focal bin)
+  nas <- is.na(sDf$bin)
+  sDf[!nas,]
+}
 
-simNichL <- lapply(spp, function(s){
-  l <- apply(bPairs, 1, function(x){
-    nicher(dat=simDf, b1=x[1], b2=x[2], sp=s, env=env, R=R, h.method=h.method)
-  })
-  do.call(rbind, l)
-})
-simNich <- do.call(rbind, simNichL)
-simNas <- is.na(simNich$bin)
-simNich <- simNich[!simNas,]
+# TODO: could convert lapply here or within kdeLoop to parallel as below 
+# in the species-pairs overlap calculations
+eList <- lapply(envCol, kdeLoop, dat=df)
+nich <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
+              suffixes=paste0('_', envCol))
+
+simNichL <- lapply(envCol, kdeLoop, dat=simDf)
+simNich <- merge(simNichL[[1]], simNichL[[2]], by=c('sp','bin'), no.dups=TRUE, 
+                 suffixes=paste0('_', envCol))
 
 # * Non-KDE niche summary -------------------------------------------------
 
@@ -507,7 +511,7 @@ interSppD <- function(b, df, env, R, h.method){
     for (s2 in bSpp){
       if (s1==s2) {next} else{
         h <- hell(kdeL[[s1]], kdeL[[s2]])
-        pairDat <- data.frame(bin=b, sp1=s1, sp2=s2, h=h)
+        pairDat <- data.frame(envVar=env, bin=b, sp1=s1, sp2=s2, h=h)
         fin <- rbind(fin, pairDat)
       }
     }
@@ -516,15 +520,22 @@ interSppD <- function(b, df, env, R, h.method){
 }
 
 registerDoParallel(ncores)
-interSppDf <- foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar%
-  interSppD(b=bin, df=df, env=env, R=R, h.method=h.method)
+interLong <- foreach(e=envCol, .packages='pracma', .combine=rbind, .inorder=FALSE) %:%
+  foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
+    interSppD(b=bin, df=df, env=e, R=R, h.method=h.method)
+  }
+simLong <- foreach(e=envCol, .packages='pracma', .combine=rbind, .inorder=FALSE) %:%
+  foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
+    interSppD(b=bin, df=simDf, env=e, R=R, h.method=h.method)
+  }
 stopImplicitCluster()
-interSppNm <- paste0('Data/foram_species_pairs_KDE_H_', day, '.csv')
-write.csv(interSppDf, interSppNm, row.names=FALSE)
 
-registerDoParallel(ncores)
-interSim <- foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar%
-  interSppD(b=bin, df=simDf, env=env, R=R, h.method=h.method)
-stopImplicitCluster()
+interWide <- spread(interLong, envVar, h)
+colnames(interWide)[3+1:length(envCol)] <- paste0('h_', envCol)
+interSppNm <- paste0('Data/foram_species_pairs_KDE_H_', day, '.csv')
+write.csv(interWide, interSppNm, row.names=FALSE)
+
+simWide <- spread(simLong, envVar, h)
+colnames(simWide)[3+1:length(envCol)] <- paste0('h_', envCol)
 interSimNm <- paste0('Data/uniform_niche_sim_pairs_KDE_H_', day, '.csv')
-write.csv(interSim, interSimNm, row.names=FALSE)
+write.csv(simWide, interSimNm, row.names=FALSE)
