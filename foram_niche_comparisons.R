@@ -220,32 +220,6 @@ pdf(bubblNm, width=5, height=4.4)
 bubbl
 dev.off()
 
-# * Inspection of mods by evo type ----------------------------------------
-puncBool <- mods$bestMod=='Punc-1'
-punc <- mods[puncBool,]
-punc$params
-
-grwBool <- mods$bestMod=='GRW'
-grw <- mods[grwBool,]
-grw$params
-
-stasisBool <- mods$bestMod=='StrictStasis'
-stasis <- mods[stasisBool,]
-
-spModBool <- mods$sp != 'sampled1'
-spMods <- mods[spModBool,]
-spMods$bestMod <- factor(spMods$bestMod, levels=c('StrictStasis','GRW','Punc-1','Stasis-GRW'))
-ymx <- max(table(spMods$bestMod))*1.1
-bp <- ggplot(data=spMods, aes(bestMod)) + 
-  theme_minimal() + #theme_bw() +
-  scale_y_continuous(name='n species sequences', expand=c(0,0), limits = c(0,ymx), labels=NULL) +
-  scale_x_discrete(name='Evolutionary model', expand=c(0,0)) +
-  geom_bar() +
-  geom_text(aes(label=..count..),stat="count",position=position_stack(.7),colour='white')
-bpNm <- paste0('Figs/evo_mode_barplot_',day,'.pdf')
-pdf(bpNm, width=4, height=3)
-bp
-dev.off()
 
 # Inter- vs intra- spp overlap --------------------------------------------
 
@@ -254,7 +228,7 @@ dev.off()
 pairH <- read.csv('Data/foram_species_pairs_KDE_H_200127.csv', stringsAsFactors=FALSE)
 # Watch out - not normally distributed because of bounds at 0 and 1.
 
-pairH$bin <- factor(pairD$bin, levels = bins)
+pairH$bin <- factor(pairH$bin, levels = bins)
 inter <- 
   ggplot(data=pairH, aes(x=bin, y=h)) +
   scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
