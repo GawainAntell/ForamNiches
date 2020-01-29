@@ -265,6 +265,74 @@ pdf(ovrlpNm, width=9, height=5)
 grid.arrange(arrangeGrob(doubl, left = y.grob))
 dev.off()
 
+# * * Overlap by ecomorph -------------------------------------------------
+
+# summarise niche data for each species as the median among intervals, to plot
+spSmry <- function(s, dat){
+  sBool <- dat$sp==s
+  sDf <- dat[sBool,]
+  numCol <- ! colnames(dat) %in% c('bin','sp','n','shortNm')
+  out <- apply(sDf[,numCol], 2, median, na.rm=TRUE)
+  out <- data.frame(t(out))
+  out$nInt <- nrow(sDf)
+  out$species <- s
+  out
+}
+medsL <- lapply(spp, spSmry, dat=intraH)
+medsDf <- do.call(rbind, medsL)
+
+# combine with species attribute data
+atts <- read.csv('Data/foram_spp_data_200108.csv', stringsAsFactors=FALSE)
+plotDf <- merge(medsDf, atts, by.x='species')
+plotDf$spinose <- as.factor(plotDf$spinose)
+plotDf$DepthHabitat <- factor(plotDf$DepthHabitat, 
+                              levels=c('Subsurface','Surface.subsurface','Surface'))
+plotDf$eco <- factor(plotDf$eco, levels=paste(5:1))
+ecoLabs <- c('Mixed layer, symb',
+             'Mixed layer, no symb',
+             'Thermocline',
+             'Sub-thermocline',
+             'High latitude')
+# From Aze et al. 2011, ecotype codes are:
+# 1 = open ocean, mixed layer, trop/subtrop, w symbionts
+# 2 = open ocean, mixed layer, trop/subtrop, w/o symbionts
+# 3 = open ocean, thermocline
+# 4 = open ocean, sub-thermocline
+# 5 = high lat
+# 6 = upwelling/high productivity
+
+empt <- ggplot(data=plotDf, aes(y=h)) +
+ # theme_bw() +
+  scale_y_continuous(limits=c(0,0.5), expand=c(0,0)) +
+  theme(axis.title.x = element_blank())
+
+p1 <- empt +
+  geom_boxplot(aes(x=DepthHabitat)) +
+  scale_x_discrete(name='Preferred depth') +
+  theme(axis.text.x = element_blank()) +
+  coord_flip()
+
+p2 <- empt +
+  geom_boxplot(aes(x=eco)) +
+  # reverse the order of labels because of the axis flip
+  scale_x_discrete(name='Ecotype', labels=rev(ecoLabs)) +
+  theme(axis.text.x = element_blank()) +
+  coord_flip()
+
+p3 <- empt +
+    geom_boxplot(aes(x=spinose)) +
+    scale_x_discrete(name='Morphotype') +
+    coord_flip()
+
+smallMult <- plot_grid(p1, p2, p3,
+                       rel_heights=c(0.7, 1, 0.5),
+                       ncol=1, align='v') 
+
+multNm <- paste0('Figs/overlap_H_by_ecomorph_',day,'.pdf')
+pdf(multNm, width=4, height=7)
+grid.arrange(arrangeGrob(smallMult), bottom='Mean Hellinger\'s H among species') 
+dev.off()
+
 # Sampled vs. species optima ----------------------------------------------
 realSpp <- setdiff(spp, 'sampled')
 nReal <- length(realSpp)
