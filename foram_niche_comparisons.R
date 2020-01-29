@@ -171,7 +171,11 @@ registerDoParallel(ncores)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
-# 4 min runtime
+modsNm <- paste0('Data/evo_model_fits_in_hab_', day, '.rds')
+# saveRDS(mods, modsNm)
+
+# alternatively, skip the ~4min runtime and load saved version:
+# mods <- readRDS(modsNm)
 
 table(mods$bestMod)
 
