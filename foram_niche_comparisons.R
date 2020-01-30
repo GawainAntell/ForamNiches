@@ -12,8 +12,10 @@ library(gridExtra)
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
+envVars <- c('temp_ym_hab','temp_ym_0m')
+
 #df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200127.csv", stringsAsFactors=FALSE)
-df <- read.csv("Data/foram_niche_sumry_metrics_200127.csv", stringsAsFactors=FALSE)
+df <- read.csv("Data/foram_niche_sumry_metrics_200129.csv", stringsAsFactors=FALSE)
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
 
@@ -68,7 +70,7 @@ nich <- splitSpp[keepBool,]
 
 # calculate mean absolute latitude at sampling points
 #allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200116.csv')
-allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200127.csv')
+allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv')
 allSampBool <- allPts$species=='sampled'
 allSamp <- allPts[allSampBool,]
 absLat <- sapply(bins, function(b){
@@ -109,7 +111,9 @@ dev.off()
 
 # Evo models --------------------------------------------------------------
 
-evoFit <- function(s){
+evoFit <- function(s, sampStats){
+  mNm <- sampStats[1]
+  sdNm <- sampStats[2]
   spBool <- nich$sp==s
   sp <- nich[spBool,]
   # also subset the sampling time series to the same bins, for comparison
@@ -124,19 +128,19 @@ evoFit <- function(s){
   l <- nrow(sp)
   strt <- sp$bin[1]
   
-  ts <- as.paleoTS(mm = sp$m_temp_ym_hab, vv = sp$sd_temp_ym_hab^2, 
-                 # mm = sp$m_temp_ym_0m, vv = sp$sd_temp_ym_0m^2,  
+  ts <- as.paleoTS(mm = sp[,mNm], vv = sp[,sdNm]^2, 
                    nn = sp$n, tt = sp$scaledT, 
                    oldest = 'first', reset.time = FALSE)
   tsSamp <- as.paleoTS(mm = samp$m_temp_ym_0m, vv = samp$sd_temp_ym_0m^2, 
+                       # TODO: use sampled environment from same depth as species
                        nn = samp$n, tt = samp$scaledT, 
                        oldest = 'first', reset.time = FALSE)
   
   if (l < 14){
-    mods <- fit4models(ts, method='Joint', silent=TRUE)
+    modsSp <- fit4models(ts, method='Joint', silent=TRUE)
     modsSamp <- fit4models(tsSamp, method='Joint', silent=TRUE)
   } else {
-    mods <- fit9models(ts, method='Joint', silent=TRUE)
+    modsSp <- fit9models(ts, method='Joint', silent=TRUE)
     modsSamp <- fit9models(tsSamp, method='Joint', silent=TRUE)
   }
   # From the package documentation:
@@ -148,56 +152,64 @@ evoFit <- function(s){
   # 'joint parameterization  is  better  able  to  correctly  identify  directional  trends. 
   # This advantage increases with sequence length, and is most pronounced when sampling error is high'
   
-  wts <- mods$modelFits$Akaike.wt
-#  mods$modelFits[order(wts),]
+  wts <- modsSp$modelFits$Akaike.wt
+#  modsSp$modelFits[order(wts),]
   maxMod <- which.max(wts)
-  modNm <- row.names(mods$modelFits)[maxMod]
+  modNm <- row.names(modsSp$modelFits)[maxMod]
   w <- max(wts)
-  params <- mods$parameters[modNm][[1]]
+  params <- modsSp$parameters[modNm][[1]]
   
   # check what model would be predicted by sampling alone for the given time bins
   sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
   sampEvo <- row.names(modsSamp$modelFits)[sampMx]
   
-  out <- data.frame(sp=s, bestMod=modNm, weight=w, l=l, start=strt, samplingMod=sampEvo)
+  out <- data.frame(sp=s, var=mNm, bestMod=modNm, weight=w, l=l, start=strt, samplingMod=sampEvo)
   out$params <- list(params)
   out
 }
 
+statsNmL <- lapply(envVars, function(txt) paste(c('m','sd'), txt, sep='_'))
+
+# alternatively, load saved version to skip the ~8 min runtime of the section below
+# mods <- readRDS("Data/evo_model_fits_200129.rds")
+
 pt1 <- proc.time()
 ncores <- detectCores() - 1
 registerDoParallel(ncores)
-  mods <- foreach(s=longSpp, .packages='paleoTS', .combine=rbind, .inorder=FALSE) %dopar% evoFit(s)
+  mods <- foreach(i=1:length(envVars), .packages='paleoTS', .combine=rbind, .inorder=FALSE) %:%
+    foreach(s=longSpp, .packages='paleoTS', .combine=rbind, .inorder=FALSE) %dopar% {
+      statsNm <- statsNmL[[i]]
+    evoFit(s, sampStats = statsNm) 
+  }
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
-modsNm <- paste0('Data/evo_model_fits_in_hab_', day, '.rds')
-# saveRDS(mods, modsNm)
 
-# alternatively, skip the ~4min runtime and load saved version:
-# mods <- readRDS(modsNm)
+modsNm <- paste0('Data/evo_model_fits_', day, '.rds')
+# saveRDS(mods, modsNm)
 
 table(mods$bestMod)
 
-# * Sampling model --------------------------------------------------------
+# PLOTS -------------------------------------------------------------------
 
-# ages must start at 0
-samp$scaledT <- 1:nrow(samp) -1
-ts <- as.paleoTS(mm = samp$m_temp_ym_0m, vv = samp$sd_temp_ym_0m^2, 
-                 nn = samp$n, tt = samp$scaledT, 
-                 oldest = 'first', reset.time = FALSE)
-sampMods <- fit9models(ts, method='Joint', silent=TRUE)
-sampMods
+# build a giant loop (across multiple sections of code)
+# to export every plot for each env variable in turn
+for (v in envVars){
+  vShrt <- paste(strsplit(v,'_')[[1]], collapse='')
+  
+# Species vs sampling evo mode --------------------------------------------
 
-# * Species vs sampling evo mode plot -------------------------------------
+vRows <- grep(v, mods$var)
+modsV <- mods[vRows,]
 
-evoModes <- names(sampMods$parameters)
+evoModes <- c('StrictStasis','Stasis','URW','GRW','Punc-1',
+              'Stasis-URW','Stasis-GRW','URW-Stasis','GRW-Stasis')
 xy <- expand.grid(spMode=evoModes, sampMode=evoModes, stringsAsFactors=FALSE)
 xy$n <- NA
 for (i in 1:nrow(xy)){
   x <- xy$sampMode[i]
   y <- xy$spMode[i]
-  same <- which(mods$samplingMod==x & mods$bestMod==y)
+  same <- which(modsV$samplingMod==x & modsV$bestMod==y)
   n <- length(same)
   xy$n[i] <- n
 }
@@ -215,22 +227,27 @@ bubbl <-
   theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5)) +
   scale_size(range=c(2,10), breaks = c(1,3,5,7,9))
 
-bubblNm <- paste0('Figs/evo_mode_bubble_matrix_', day, '.pdf')
+bubblNm <- paste0('Figs/evo_mode_bubble_matrix_', vShrt, day, '.pdf')
 pdf(bubblNm, width=5, height=4.4)
-bubbl
+print(bubbl)
 dev.off()
-
 
 # Inter- vs intra- spp overlap --------------------------------------------
 
 # * Inter-spp niche overlap -----------------------------------------------
 
-pairH <- read.csv('Data/foram_species_pairs_KDE_H_200127.csv', stringsAsFactors=FALSE)
+pairH <- read.csv('Data/foram_species_pairs_KDE_H_200129.csv', stringsAsFactors=FALSE)
 # Watch out - not normally distributed because of bounds at 0 and 1.
 
 pairH$bin <- factor(pairH$bin, levels = bins)
+
+# ggplot calls the variables directly - cannot give names as characters
+# so duplicate the relevant enviro variable to a column with the consistent name 'y'
+yNm <- paste('h', v, sep='_')
+pairH$y <- pairH[,yNm]
+
 inter <- 
-  ggplot(data=pairH, aes(x=bin, y=h)) +
+  ggplot(data=pairH, aes(x=bin, y=y)) + 
   scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=6),
@@ -241,7 +258,8 @@ inter <-
 
 keep <- df$sp != 'sampled'
 intraH <- df[keep,]
-consec <- ! is.na(intraH$h)
+intraH$y <- intraH[,yNm]
+consec <- ! is.na(intraH$y)
 intraH <- intraH[consec,]
 intraH$shortNm <- sapply(intraH$sp, function(txt){
   splt <- strsplit(txt, ' ')
@@ -249,7 +267,7 @@ intraH$shortNm <- sapply(intraH$sp, function(txt){
 } )
 
 intra <- 
-  ggplot(data=intraH, aes(x=shortNm, y=h)) +
+  ggplot(data=intraH, aes(x=shortNm, y=y)) +
   scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
@@ -260,9 +278,79 @@ intra <-
 y.grob <- textGrob('Hellinger\'s H distance', gp=gpar(fontface='bold', fontsize=15), rot=90)
 doubl <- plot_grid(inter, intra, nrow=1, align='h', rel_widths = c(1,0.35))
 
-ovrlpNm <- paste0('Figs/overlap_H_boxplots_inter_vs_intraspecific',day,'.pdf')
+ovrlpNm <- paste0('Figs/overlap_H_boxplots_inter_vs_intraspecific_',vShrt,day,'.pdf')
 pdf(ovrlpNm, width=9, height=5)
 grid.arrange(arrangeGrob(doubl, left = y.grob))
+dev.off()
+
+# Intra-sp overlap vs evo mode --------------------------------------------
+
+realSpp <- setdiff(spp, 'sampled')
+
+# arrange boxplot in order of inceasing niche lability/larger H
+meanH <- function(s,dat){
+  sBool <- dat$sp==s
+  sDat <- dat[sBool,]
+  hNm <- paste('h',v,sep='_')
+  mean(sDat[,hNm])
+}
+hVect <- sapply(realSpp, meanH, dat=intraH)
+spOrdr <- names(sort(hVect))
+intraH$sp <- factor(intraH$sp, levels=spOrdr)
+
+# add colour-codes for evo model type:
+# strict and loose stasis vs. non-stasis vs. mix
+# note: no species were fit with punct-1, so this isn't classified
+stBool <- modsV$bestMod %in% c('StrictStasis','Stasis')
+stSp <- modsV$sp[stBool]
+labBool <- modsV$bestMod %in% c('GRW','URW')
+labSp <- modsV$sp[labBool]
+mixBool <- modsV$bestMod %in% 
+  c('GRW-Stasis','URW-Stasis','Stasis-GRW','Stasis-URW')
+mixSp <- modsV$sp[mixBool]
+
+for (s in realSpp){
+  sBool <- intraH$sp==s
+  
+  isSt <- length(grep(s, stSp))
+  isLab <- length(grep(s, labSp))
+  isMix <- length(grep(s, mixSp))
+  # check for cases where a species has multiple segments
+  # and different model types are fit to them
+  tests <- c(isSt!=0, isLab!=0, isMix!=0)
+  if (sum(tests) > 1){
+    intraH$class[sBool] <- 'NA'
+  } else {
+    if (isSt > 0){
+      intraH$class[sBool] <- 'Static '
+    }
+    if (isLab > 0){
+      intraH$class[sBool] <- 'Labile '
+    }
+    if (isMix > 0){
+      intraH$class[sBool] <- 'Complex '
+    }
+  }
+  if ((sum(tests) == 0)) stop(paste('no classification for', s))
+}
+
+colr <- c('#3333FF','#FFFF33','#00CC00','#FFFFFF')
+names(colr) <- c('Static ','Labile ','Complex ','NA')
+
+evoHplot <- 
+  ggplot(data=intraH, aes(x=sp, y=y)) +
+  theme_bw() +
+  scale_y_continuous(name='Hellinger\'s H', limits=c(0,1), expand=c(0,0)) + 
+  geom_boxplot(aes(fill=class)) +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
+        axis.title.x = element_blank(),
+        legend.position = 'top') +
+  scale_fill_manual(name='Evo model class', values=colr, 
+                    breaks=c('Static ','Labile ','Complex ','NA')) 
+
+evoHnm <- paste0('Figs/overlap_H_boxplots_intraspecific_vs_evo_mode_',vShrt,day,'.pdf')  
+pdf(evoHnm, width=7, height=4)
+print(evoHplot)
 dev.off()
 
 # * * Overlap by ecomorph -------------------------------------------------
@@ -271,7 +359,7 @@ dev.off()
 spSmry <- function(s, dat){
   sBool <- dat$sp==s
   sDf <- dat[sBool,]
-  numCol <- ! colnames(dat) %in% c('bin','sp','n','shortNm')
+  numCol <- ! colnames(dat) %in% c('bin','sp','n','shortNm','class')
   out <- apply(sDf[,numCol], 2, median, na.rm=TRUE)
   out <- data.frame(t(out))
   out$nInt <- nrow(sDf)
@@ -301,64 +389,91 @@ ecoLabs <- c('Mixed layer, symb',
 # 5 = high lat
 # 6 = upwelling/high productivity
 
-empt <- ggplot(data=plotDf, aes(y=h)) +
- # theme_bw() +
-  scale_y_continuous(limits=c(0,0.5), expand=c(0,0)) +
+empt <- ggplot(data=plotDf, aes(y=y)) +
+  theme_bw() +
+  scale_y_continuous(limits=c(0,0.4), expand=c(0,0)) +
   theme(axis.title.x = element_blank())
 
-p1 <- empt +
-  geom_boxplot(aes(x=DepthHabitat)) +
+# add n-labels aligned at left of plot area
+lablr <- function(v){
+  lab <- paste('n =', length(v))
+  data.frame(y=0.05, label=lab)
+}
+
+p1 <- 
+  empt +
+  geom_boxplot(aes(x=DepthHabitat), fill='grey') +
   scale_x_discrete(name='Preferred depth') +
   theme(axis.text.x = element_blank()) +
+  stat_summary(
+    aes(x=DepthHabitat),
+    fun.data = lablr, 
+    geom = "text"
+  ) + 
   coord_flip()
 
 p2 <- empt +
-  geom_boxplot(aes(x=eco)) +
+  geom_boxplot(aes(x=eco), fill='grey') +
   # reverse the order of labels because of the axis flip
   scale_x_discrete(name='Ecotype', labels=rev(ecoLabs)) +
   theme(axis.text.x = element_blank()) +
+  stat_summary(
+    aes(x=eco),
+    fun.data = lablr, 
+    geom = "text"
+  ) + 
   coord_flip()
 
 p3 <- empt +
-    geom_boxplot(aes(x=spinose)) +
+    geom_boxplot(aes(x=spinose), fill='grey') +
     scale_x_discrete(name='Morphotype') +
+    stat_summary(
+      aes(x=spinose),
+      fun.data = lablr, 
+      geom = "text"
+    ) + 
     coord_flip()
 
 smallMult <- plot_grid(p1, p2, p3,
                        rel_heights=c(0.7, 1, 0.5),
                        ncol=1, align='v') 
 
-multNm <- paste0('Figs/overlap_H_by_ecomorph_',day,'.pdf')
+multNm <- paste0('Figs/overlap_H_by_ecomorph_',vShrt,day,'.pdf')
 pdf(multNm, width=4, height=7)
 grid.arrange(arrangeGrob(smallMult), bottom='Mean Hellinger\'s H among species') 
 dev.off()
 
 # Sampled vs. species optima ----------------------------------------------
-realSpp <- setdiff(spp, 'sampled')
+kdeSim <- read.csv("Data/uniform_niche_sim_sumry_metrics_200129.csv", stringsAsFactors=FALSE)
+
 nReal <- length(realSpp)
-optCor <- function(s, dat){
+
+optCor <- function(s, var, dat){
   spRows <- grep(s, dat$sp)
   sDat <- dat[spRows,]
   bNms <- paste0('X',sDat$bin)
   gDat <- globMean[bNms]
-  cor(gDat, sDat$pe, method='spear')
+  mCol <- paste(var,v,sep='_')
+  cor(gDat, sDat[,mCol], method='spear')
 }
 
-corsReal <- sapply(realSpp, optCor, dat=nich)
-
-kdeSim <- read.csv("Data/uniform_niche_sim_sumry_metrics_200127.csv", stringsAsFactors=FALSE)
-corsSim <- sapply(realSpp, optCor, dat=kdeSim)
+for (metric in c('m','pe')){
+corsReal <- sapply(realSpp, optCor, dat=nich, var=metric)
+corsSim <- sapply(realSpp, optCor, dat=kdeSim, var=metric)
 
 trt <- c(rep('real species',nReal), rep('simulated neutral niche',nReal))
 cors <- data.frame(cor=c(corsReal, corsSim), treatment=trt)
+yNm <- paste('rho corr., sp',metric,' vs. global MAT')
 boxes <- 
   ggplot(data=cors, aes(x=trt, y=cor)) +
   geom_boxplot() +
-  scale_y_continuous(name='rho correlation with global MAT') +
+  scale_y_continuous(name=yNm, limits=c(-1,1), expand=c(0,0)) + # c(-0.7,0.7)
   theme(axis.title.x=element_blank())
-boxesNm <- paste0('Figs/optima_corr_w_global_MAT_', day, '.pdf')
+boxesNm <- paste0('Figs/global_MAT_corr_w_sp_', metric, '_', vShrt, day, '.pdf')
 pdf(boxesNm, width=4, height=4)
-boxes
+print(boxes)
 dev.off()
 
-t.test(corsReal, corsSim, paired = TRUE)
+#t.test(corsReal, corsSim, paired = TRUE)
+}
+} # end loop through environmental variables to plot
