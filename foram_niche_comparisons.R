@@ -110,8 +110,9 @@ chart.Correlation(corVars, histogram=TRUE, pch=19, method='pearson')
 dev.off()
 
 # Evo models --------------------------------------------------------------
+# TODO: use sampled environment from same depth as species
 
-evoFit <- function(s, sampStats){
+evoFit <- function(s, sampStats, nmods='nine'){
   mNm <- sampStats[1]
   sdNm <- sampStats[2]
   spBool <- nich$sp==s
@@ -132,11 +133,10 @@ evoFit <- function(s, sampStats){
                    nn = sp$n, tt = sp$scaledT, 
                    oldest = 'first', reset.time = FALSE)
   tsSamp <- as.paleoTS(mm = samp$m_temp_ym_0m, vv = samp$sd_temp_ym_0m^2, 
-                       # TODO: use sampled environment from same depth as species
                        nn = samp$n, tt = samp$scaledT, 
                        oldest = 'first', reset.time = FALSE)
   
-  if (l < 14){
+  if (l < 14 | nmods=='four'){
     modsSp <- fit4models(ts, method='Joint', silent=TRUE)
     modsSamp <- fit4models(tsSamp, method='Joint', silent=TRUE)
   } else {
@@ -170,8 +170,9 @@ evoFit <- function(s, sampStats){
 
 statsNmL <- lapply(envVars, function(txt) paste(c('m','sd'), txt, sep='_'))
 
-# alternatively, load saved version to skip the ~8 min runtime of the section below
-# mods <- readRDS("Data/evo_model_fits_200129.rds")
+# alternatively, load saved versions and skip running the section in parallel below
+# mods <- readRDS("Data/9_evo_model_fits_200129.rds")
+# mods4 <- readRDS("Data/4_evo_model_fits_200131.rds")
 
 pt1 <- proc.time()
 ncores <- detectCores() - 1
@@ -179,14 +180,20 @@ registerDoParallel(ncores)
   mods <- foreach(i=1:length(envVars), .packages='paleoTS', .combine=rbind, .inorder=FALSE) %:%
     foreach(s=longSpp, .packages='paleoTS', .combine=rbind, .inorder=FALSE) %dopar% {
       statsNm <- statsNmL[[i]]
-    evoFit(s, sampStats = statsNm) 
-  }
+    evoFit(s, sampStats = statsNm, nmods = 'nine') 
+    } # 8 min runtime
+  mods4 <- foreach(i=1:length(envVars), .packages='paleoTS', .combine=rbind, .inorder=FALSE) %:%
+    foreach(s=longSpp, .packages='paleoTS', .combine=rbind, .inorder=FALSE) %dopar% {
+      statsNm <- statsNmL[[i]]
+      evoFit(s, sampStats = statsNm, nmods = 'four') 
+    } # only a few seconds runtime
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
 
-modsNm <- paste0('Data/evo_model_fits_', day, '.rds')
-# saveRDS(mods, modsNm)
+mods9nm <- paste0('Data/9_evo_model_fits_', day, '.rds')
+mods4nm <- paste0('Data/4_evo_model_fits_', day, '.rds')
+# saveRDS(mods, mods9nm); saveRDS(mods4, mods4nm)
 
 table(mods$bestMod)
 
@@ -197,7 +204,7 @@ table(mods$bestMod)
 for (v in envVars){
   vShrt <- paste(strsplit(v,'_')[[1]], collapse='')
   
-# Species vs sampling evo mode --------------------------------------------
+# Spp vs sampling evo mode ------------------------------------------------
 
 vRows <- grep(v, mods$var)
 modsV <- mods[vRows,]
@@ -283,7 +290,7 @@ pdf(ovrlpNm, width=9, height=5)
 grid.arrange(arrangeGrob(doubl, left = y.grob))
 dev.off()
 
-# Intra-sp overlap vs evo mode --------------------------------------------
+# * * Intra overlap vs evo mode -------------------------------------------
 
 realSpp <- setdiff(spp, 'sampled')
 
@@ -351,6 +358,53 @@ evoHplot <-
 evoHnm <- paste0('Figs/overlap_H_boxplots_intraspecific_vs_evo_mode_',vShrt,day,'.pdf')  
 pdf(evoHnm, width=7, height=4)
 print(evoHplot)
+dev.off()
+
+# * * Intra overlap vs evo var --------------------------------------------
+
+getV <- function(x){
+  xmod <- x$bestMod
+  if (xmod=='StrictStasis'){
+    v <- 0
+  }
+  if (xmod=='Stasis'){
+    plist <- x['params']
+    v <- plist[[1]]['omega']
+  }
+  if (xmod %in% c('URW','GRW')){
+    plist <- x['params']
+    v <- plist[[1]]['vstep']
+  }
+  return(v)
+}
+mods4$stepvar <- apply(mods4, 1, getV)
+
+# subset the model-summary dataframe to the focal environmental variable,
+v4rows <- grep(v, mods4$var)
+mods4v <- mods4[v4rows,]
+
+# summarise H for the same sequences as evo models are fit
+# (the other plots consider H even from intervals outside sequences of 7+ bins)
+getH <- function(s){
+  sBool <- nich$sp==s
+  sDf <- nich[sBool,]
+  median(sDf[,yNm], na.rm=TRUE)
+}
+longSpp <- sort(longSpp)
+seqH <- sapply(longSpp, getH)
+hDf <- data.frame(sp=longSpp, h=seqH)
+
+mods4v <- merge(mods4v, hDf, 'sp')
+vh <- 
+  ggplot(mods4v, aes(x=h, y=stepvar)) +
+  scale_y_continuous(name='estimated evo model variance') +
+  scale_x_continuous(name='median H among time intervals') +
+  geom_point(aes(col=bestMod)) +# , size=3
+  theme_bw()
+
+vhNm <- paste0('Figs/overlap_H_vs_evo_mod_variance_',vShrt,day,'.pdf')
+pdf(vhNm, width=5, height=4)
+vh
 dev.off()
 
 # * * Overlap by ecomorph -------------------------------------------------
