@@ -1,12 +1,15 @@
 library(ggplot2)
 library(sp)
 library(raster)
+library(cowplot)
+library(grid)
+library(gridExtra)
 
 # Data prep ---------------------------------------------------------------
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-occ <- read.csv('Data/foram_MAT_occs_latlong_8ka_200103.csv', stringsAsFactors=FALSE)
+occ <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv', stringsAsFactors=FALSE)
 bins <- unique(occ$bin) 
 
 # split data into present-day (last 16 ka) vs. older
@@ -70,6 +73,81 @@ lplot <-
 lNm <- paste0('tseries_spp_count_', day, '.pdf')
 pdf(lNm, width=4, height=3)
 lplot
+dev.off()
+
+# Map species by depth habitat --------------------------------------------
+
+# maps of all species, last 16 ka
+# label and sort species by depth habitat
+# surface layer temperature raster
+
+mod <- modCodes$age_1000ka==8
+id <- modCodes$id[mod]
+flPos <- grep(id, rTemp)
+fl <- rTemp[flPos]
+rNm <- paste0('Data/gcm_annual_mean/',fl)
+# surface-level temperature
+r <- brick(rNm)[[1]]
+x <- seq(-180,180,length=288)
+y <- seq(90,-90,length=144)
+rDf <- expand.grid(x,y)
+rDf$val <- values(r)
+
+# set blue as low temp value
+colr <- rainbow(40)[c(30:1)] 
+
+plotSp <- function(s){
+  sBool <- modrn$species==s
+  slc <- modrn[sBool,]
+  coords <- slc[,c('centroid_long','centroid_lat')]
+  
+  ggplot() +
+    ggtitle(s) +
+    scale_x_continuous(name='', limits=c(-180,180), expand=c(0,0)) +
+    scale_y_continuous(name='', limits=c(-90,90), expand=c(0,0)) +
+    geom_raster(data=rDf, aes(x=Var1, y=Var2, fill=val)) +
+    geom_point(data=coords, aes(x=centroid_long, y=centroid_lat), size=1) +
+    scale_fill_gradientn(limits=c(0,33), colors=colr) +
+    theme(plot.title = element_text(hjust=.5, size=8),
+          axis.text = element_blank(), 
+          axis.ticks = element_blank(),
+          legend.position = 'none') 
+}
+
+spp <- unique(modrn$species)
+
+# combine coordinates with species attribute data (depth habitat)
+atts <- read.csv('Data/foram_spp_data_200108.csv', stringsAsFactors=FALSE)
+#plotDf <- merge(modrn, atts, by.x='species')
+#plotDf$DepthHabitat <- factor(plotDf$DepthHabitat, 
+#                              levels=c('Subsurface','Surface.subsurface','Surface'))
+deepRows <- which(atts$DepthHabitat=='Subsurface')
+deep <- atts$species[deepRows]
+deep <- intersect(deep, spp)
+midRows <- which(atts$DepthHabitat=='Surface.subsurface')
+mid <- atts$species[midRows]
+mid <- intersect(mid, spp)
+shalRows <- which(atts$DepthHabitat=='Surface')
+shal <- atts$species[shalRows]
+shal <- intersect(shal, spp)
+
+deepPlots <- lapply(deep, plotSp)
+midPlots <- lapply(mid, plotSp)
+shalPlots <- lapply(shal, plotSp)
+
+deepMulti <- plot_grid(plotlist=deepPlots, ncol=5, align='v') 
+midMulti <- plot_grid(plotlist=midPlots, ncol=5, align='v') 
+shalMulti <- plot_grid(plotlist=shalPlots, ncol=5, align='v')
+
+deepPanel <- grid.arrange(arrangeGrob(deepMulti), top='Subsurface species, 160 m') 
+midPanel <- grid.arrange(arrangeGrob(midMulti), top='Surface-Subsurface species, 80 m') 
+shalPanel <- grid.arrange(arrangeGrob(shalMulti), top='Surface species, 40 m') 
+
+spMapsNm <- paste0('Figs/species_maps_8ka_by_depth_',day,'.pdf')
+pdf(spMapsNm, width=8.5, height=11)
+grid.arrange(shalPanel, midPanel, deepPanel, 
+             heights=c(1,1,0.5),
+             layout_matrix=rbind(1,2,3))
 dev.off()
 
 # gifs --------------------------------------------------------------------
