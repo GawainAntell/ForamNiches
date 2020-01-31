@@ -530,4 +530,71 @@ dev.off()
 
 #t.test(corsReal, corsSim, paired = TRUE)
 }
+
+# Time series -------------------------------------------------------------
+
+# Missing sp-bin combinations have already been removed from the df object.
+# Add them back in so that the time series are plotted with gaps.
+
+combos <- expand.grid(spp, bins)
+colnames(combos) <- c('sp','bin')
+df <- merge(combos, df, all.x=TRUE, by=c('sp','bin'))
+
+mCurr <- paste('m', v, sep='_')
+sdCurr <- paste('sd', v, sep='_')
+nCurr <- paste('n', v, sep='_')
+df$m <- df[,mCurr]
+df$se <- df[,sdCurr]/sqrt(df[,nCurr])
+
+spSort <- c('sampled',sort(realSpp))
+df$sp <- factor(df$sp, levels=spSort)
+
+# this chunk draws on objects from 'spp vs sampling evo mode' section
+for (s in spp){
+  sBool <- df$sp==s
+  
+  isSt <- length(grep(s, stSp))
+  isLab <- length(grep(s, labSp))
+  isMix <- length(grep(s, mixSp))
+  # check for cases where a species has multiple segments
+  # and different model types are fit to them
+  tests <- c(isSt!=0, isLab!=0, isMix!=0)
+  if (sum(tests) > 1){
+    df$class[sBool] <- 'Complex '
+  } else {
+    if (isSt > 0){
+      df$class[sBool] <- 'Static '
+    }
+    if (isLab > 0){
+      df$class[sBool] <- 'Labile '
+    }
+    if (isMix > 0){
+      df$class[sBool] <- 'Complex '
+    }
+  }
+  if ((sum(tests) == 0)) stop(paste('no classification for', s))
+}
+
+colr <- c('#3333FF','#FFFF33','#00CC00')
+names(colr) <- c('Static ','Labile ','Complex ')
+
+tsPlot <- ggplot(data=df)+
+  theme_bw() +
+  scale_x_continuous(name='Time (8ka intervals)', expand=c(0.01,0)) +
+  geom_line(aes(x=-bin, y=m, col=class), size=0.5) +
+  geom_point(aes(x=-bin, y=m, col=class), size=0.7) +
+  geom_linerange(aes(x=-bin, ymin=m-se, ymax=m+se, col=class), size=0.4)+
+  facet_wrap(~sp) +
+  theme(strip.text.x = element_text(size = 6)) +
+  theme(legend.position = 'bottom') +
+  scale_fill_manual(name='Evo model class', values=colr, 
+                    breaks=c('Static ','Labile ','Complex ')) 
+
+tsNm <- paste0('Figs/time_series_species_mean.se_', vShrt, day, '.pdf')
+pdf(tsNm, width=8, height=9)
+tsPlot
+dev.off()
+
 } # end loop through environmental variables to plot
+
+  
