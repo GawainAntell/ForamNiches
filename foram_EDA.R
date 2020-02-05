@@ -75,6 +75,73 @@ pdf(lNm, width=4, height=3)
 lplot
 dev.off()
 
+
+# Example KDE plots -------------------------------------------------------
+
+source('GSA_custom_ecospat_fcns.R')
+nbins <- length(bins)
+h.method <- "nrd0" # "SJ-ste" # "ucv"
+R <- 2^8
+
+env <- 'temp_ym_0m'
+spp <- unique(occ$species)
+xmax <- max(occ[,env])
+xmin <- min(occ[,env])
+focalB <- seq(100, 700, by=200)
+# b <- 100; s <- spp[2]
+
+for (b in focalB){
+  bBool <- occ$bin==b
+  slc <- occ[bBool,]
+  
+  plotL <- list()
+  for (s in spp){
+    spRows <- which(slc$species==s)
+    spSlc <- slc[spRows,env]
+    z1 <- tryCatch(
+      kdeNiche(sp=spSlc, xmax=xmax, xmin=xmin, R=R, h.method=h.method),
+      error = function(err){ list() }
+    ) 
+    if (length(z1)==0){next}
+    
+    x <- z1$x
+    kd <- z1$z
+    x <- c(xmin, x, xmax)
+    kd <- c(0, kd, 0)
+    plotDat <- data.frame(x=x, kd=kd)
+    nlab <- paste0('n=', length(spSlc))
+    noNa <- length(x) - length(spSlc)
+    plotDat$rugHack <- c(spSlc, rep(NA, noNa))
+    sPlot <- 
+      ggplot(data=plotDat, aes(x=x, y=kd)) +
+        theme_bw() +
+        ggtitle(s) +
+        geom_area(fill='grey80') +
+        geom_line() +
+        geom_segment(x=z1$pe, xend=z1$pe, y=0, yend=1) +
+        geom_segment(x=mean(spSlc), xend=mean(spSlc), y=0, yend=1, colour='blue') +
+        geom_hline(yintercept=0) +
+        geom_rug(aes(x=rugHack), sides='b', length=unit(0.045, "npc")) + # ,outside = TRUE
+     #   coord_cartesian(clip = "off") +
+        scale_x_continuous(expand=c(0,0)) +
+        theme(axis.title.x = element_blank(),
+              axis.title.y = element_blank(),
+              plot.title = element_text(size=9))
+    sPlot <- sPlot +
+      geom_text(aes(fontface=1),label=nlab, size=3,
+                x=3, y=0.9*max(plotDat$kd))
+      
+    plotL <- append(plotL, list(sPlot))
+  }
+  
+  # print page of plots
+  pg <- plot_grid(plotlist=plotL, nrow=6)
+  kdeNm <- paste0('Figs/KDE_all_spp_',h.method,'_',b,'ka_',day,'.pdf')
+  pdf(kdeNm, width=8.5, height=11)
+  grid.arrange(arrangeGrob(pg))
+  dev.off()
+}
+
 # Map species by depth habitat --------------------------------------------
 
 # maps of all species, last 16 ka
