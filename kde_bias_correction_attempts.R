@@ -77,59 +77,53 @@ sp <-
 
 # Simulate data -----------------------------------------------------------
 
-n <- 200
-  #  upr <- 10
-    
-# define true species density (f) and sampling bias (w) functions
+# in Barmi & Simonoff 2000:
+# true Chi-square distribution is k=2 or 12; n = 50 or 200
+nVals <- c(50, 200)
+kVals <- c(2, 12)
+hMeths <- c('nrd0','SJ-ste')
 
-# true Chi-square distribution is k=2 in Barmi & Simonoff 2000
-  #f <- rchisq(n=n, df=2)
-  #hist(f)
+# calculate MISE for chi-sq distribution with given n and df
+simBS <- function(n, k, hMeth){
+  # when w(x)=x, then g is a chi-sq density of k+2
+  X <- rchisq(n=n, df=k+2)
+  
+  uhat <- n * sum( w(X)^-1 )^-1
+  Y <- sapply(X, function(x){
+    integrate(w, lower = 0, upper = x)$value
+  })
+  
+  # kernel density estimation on transformed data
+  kde <- density(Y, kernel='gaussian', bw=hMeth, cut=0)
+  
+  # scale to integrate to one
+  kde$y <- uhat * kde$y
+  
+  # back-transform from the y=W(x) argument to x
+  kde$xTrans <- kde$x
+  kde$x <- sqrt(2 * kde$x)
+  # plot(kde)
+  
+  # calculate MISE (minimum integrated squared error)
+  a <- min(X)
+  b <- max(X)
+  fhat <- approxfun(kde$x, kde$y)
+  se <- function(x) (fhat(x) - dchisq(x, df=k))^2
+  integral(se, a, b)
+}
 
-  # Alternatively, more complicated gamma function
-  # f <- function(x, a, s){
-  #   1/(s^a * gamma(a)) * x^(a-1) * exp(1)^-(x/s)
-  # } 
-  # fx <- f(seq(0,1,by=0.01), 2, 0.25)
-  # plot(seq(0,1,by=0.01), fx)
+# recreate table 1 from Barmi & Simonoff 2000
+tab1 <- data.frame(matrix(ncol=4, nrow=0))
+for (n in nVals){
+  for (k in kVals){
+    for (hMeth in hMeths){
+      mises <- replicate(500, simBS(n,k,hMeth))
+      mise <- mean(mises)
+      tab1 <- rbind(tab1, cbind(hMeth, n, k, mise))
+    }
+  }
+}
 
-# classical length-bias, Cox 1969
-w <- function(x){ x }
 
-  #gUnscld <- function(x){
-  #  dchisq(x, df=2) * w(x)
-    # f(x,a=2,s=0.25) * w(x) # gamma distribution
-  #}
-  #u <- integrate(gUnscld, lower=0, upper=upr)$value
-  #g <- function(x){ 
-  #  gUnscld(x) / u
-  #}
-# simulate data under g, where g=f*w/u
-  #gIn <- runif(n, min=0, max=upr)
-  #x <- g(gIn)
 
-# when w(x)=x, then g is a chi-sq density of k+2
-X <- rchisq(n=n, df=4)
-
-# Barmi and Simonoff transform --------------------------------------------
-
-uhat <- n * sum( w(X)^-1 )^-1
-Y <- sapply(X, function(x){
-  integrate(w, lower = 0, upper = x)$value
-})
-
-# kernel density estimation on transformed data
-kde <- density(Y, kernel='gaussian', bw='nrd0', cut=0) #    from=xmin, to=xmax, n=R
-
-# scale to integrate to one
-kde$y <- uhat * kde$y
-
-# back-transform from the y=W(x) argument to x
-kde$xTrans <- kde$x
-kde$x <- sqrt(2 * kde$x)
-plot(kde)
-
-# calculate minimum integrated squared error
-# when the smoothing parameter is chosen
-# in each replication to minimize ISE.
 
