@@ -85,6 +85,8 @@ hMeths <- c('nrd0','SJ-ste')
 
 # calculate MISE for chi-sq distribution with given n and df
 simBS <- function(n, k, hMeth){
+  w <- function(x){ x }
+  
   # when w(x)=x, then g is a chi-sq density of k+2
   X <- rchisq(n=n, df=k+2)
   
@@ -94,36 +96,51 @@ simBS <- function(n, k, hMeth){
   })
   
   # kernel density estimation on transformed data
-  kde <- density(Y, kernel='gaussian', bw=hMeth, cut=0)
+  # note that the authors used local quadratic likelihood instead
+  kdeTrans <- density(Y, kernel='gaussian', bw=hMeth, cut=0)
   
   # scale to integrate to one
-  kde$y <- uhat * kde$y
+  kdeTrans$y <- uhat * kdeTrans$y
   
   # back-transform from the y=W(x) argument to x
-  kde$xTrans <- kde$x
-  kde$x <- sqrt(2 * kde$x)
+  kdeTrans$xTrans <- kdeTrans$x
+  kdeTrans$x <- sqrt(2 * kdeTrans$x)
   # plot(kde)
   
   # calculate MISE (minimum integrated squared error)
   a <- min(X)
   b <- max(X)
-  fhat <- approxfun(kde$x, kde$y)
+  fhat <- approxfun(kdeTrans$x, kdeTrans$y)
   se <- function(x) (fhat(x) - dchisq(x, df=k))^2
-  integral(se, a, b)
+  mise <- integral(se, a, b)
+  
+  # kernel density estimation after Jones 1991
+  
+  # calculate  weights
+  wts <- 1/w(X)
+  wts <- wts/sum(wts)
+  kdeJ <- density(X, kernel='gaussian', bw=hMeth, cut=0,
+                  weights=wts)
+  fhatJ <- approxfun(kdeJ$x, kdeJ$y)
+  seJ <- function(x) (fhatJ(x) - dchisq(x, df=k))^2
+  miseJ <- integral(seJ, a, b)
+  
+  c(miseJ, mise)
 }
 
 # recreate table 1 from Barmi & Simonoff 2000
-tab1 <- data.frame(matrix(ncol=4, nrow=0))
+tab1 <- data.frame(matrix(ncol=5, nrow=0))
 for (n in nVals){
   for (k in kVals){
     for (hMeth in hMeths){
       mises <- replicate(500, simBS(n,k,hMeth))
-      mise <- mean(mises)
-      tab1 <- rbind(tab1, cbind(hMeth, n, k, mise))
+      mise <- colMeans(t(mises))
+      newRow <- data.frame(hMeth, n, k, t(mise))
+      tab1 <- rbind(tab1, newRow)
     }
   }
 }
-
+colnames(tab1) <- c('hMeth','n','k','MISEJones','MISEtrans')
 
 
 
