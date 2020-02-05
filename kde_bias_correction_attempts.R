@@ -77,30 +77,59 @@ sp <-
 
 # Simulate data -----------------------------------------------------------
 
+n <- 200
+  #  upr <- 10
+    
 # define true species density (f) and sampling bias (w) functions
 
-#f <- rbeta(n=n, 2, 5)
-# hist(f, breaks = seq(0,1,by=0.05))
-f <- function(x, a, s){
-  1/(s^a * gamma(a)) * x^(a-1) * exp(1)^-(x/s)
-} 
-# fx <- f(x, 2, 0.25)
-# plot(x, fx)
+# true Chi-square distribution is k=2 in Barmi & Simonoff 2000
+  #f <- rchisq(n=n, df=2)
+  #hist(f)
 
-w <- function(x){ x } # could instead be gamma, Cauchy, etc.
+  # Alternatively, more complicated gamma function
+  # f <- function(x, a, s){
+  #   1/(s^a * gamma(a)) * x^(a-1) * exp(1)^-(x/s)
+  # } 
+  # fx <- f(seq(0,1,by=0.01), 2, 0.25)
+  # plot(seq(0,1,by=0.01), fx)
 
-gUnscld <- function(x){
-  f(x,a=2,s=0.25) * w(x)
-}
-u <- integrate(gUnscld, lower=0, upper=1)$value
-g <- function(x){ 
-  gUnscld(x) / u
-}
+# classical length-bias, Cox 1969
+w <- function(x){ x }
 
+  #gUnscld <- function(x){
+  #  dchisq(x, df=2) * w(x)
+    # f(x,a=2,s=0.25) * w(x) # gamma distribution
+  #}
+  #u <- integrate(gUnscld, lower=0, upper=upr)$value
+  #g <- function(x){ 
+  #  gUnscld(x) / u
+  #}
 # simulate data under g, where g=f*w/u
-n <- 100
-x <- runif(n)
-y <- g(x)
-# plot(x,y)
+  #gIn <- runif(n, min=0, max=upr)
+  #x <- g(gIn)
 
+# when w(x)=x, then g is a chi-sq density of k+2
+X <- rchisq(n=n, df=4)
+
+# Barmi and Simonoff transform --------------------------------------------
+
+uhat <- n * sum( w(X)^-1 )^-1
+Y <- sapply(X, function(x){
+  integrate(w, lower = 0, upper = x)$value
+})
+
+# kernel density estimation on transformed data
+kde <- density(Y, kernel='gaussian', bw='nrd0', cut=0) #    from=xmin, to=xmax, n=R
+
+# scale to integrate to one
+kde$y <- uhat * kde$y
+
+# back-transform from the y=W(x) argument to x
+kde$xTrans <- kde$x
+kde$x <- sqrt(2 * kde$x)
+plot(kde)
+
+# calculate minimum integrated squared error
+# when the smoothing parameter is chosen
+# in each replication to minimize ISE.
 
