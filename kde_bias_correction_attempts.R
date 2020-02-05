@@ -1,5 +1,7 @@
 library(pracma)
 
+# Empirical data ----------------------------------------------------------
+
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
 occ <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv', stringsAsFactors=FALSE)
@@ -20,6 +22,8 @@ b <- 100; s <-'sampled'#  spp[2]
 spRows <- which(occ$bin==b & occ$species==s)
 sp <- 
   samp <- occ[spRows,env]
+
+# Estimate kernel density -------------------------------------------------
 
 #kdeNiche <- 
 #  function (sp, samp=NULL, xmax, xmin, R, h.method="nrd0", weight=FALSE) {
@@ -70,4 +74,33 @@ sp <-
     
 #    return(l)
 #  }
+
+# Simulate data -----------------------------------------------------------
+
+# define true species density (f) and sampling bias (w) functions
+
+#f <- rbeta(n=n, 2, 5)
+# hist(f, breaks = seq(0,1,by=0.05))
+f <- function(x, a, s){
+  1/(s^a * gamma(a)) * x^(a-1) * exp(1)^-(x/s)
+} 
+# fx <- f(x, 2, 0.25)
+# plot(x, fx)
+
+w <- function(x){ x } # could instead be gamma, Cauchy, etc.
+
+gUnscld <- function(x){
+  f(x,a=2,s=0.25) * w(x)
+}
+u <- integrate(gUnscld, lower=0, upper=1)$value
+g <- function(x){ 
+  gUnscld(x) / u
+}
+
+# simulate data under g, where g=f*w/u
+n <- 100
+x <- runif(n)
+y <- g(x)
+# plot(x,y)
+
 
