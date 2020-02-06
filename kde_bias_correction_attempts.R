@@ -33,7 +33,8 @@ miser <- function(x, n, k, hMeth, nbreak, w){
   wcdf <- function(u){
     integral(w, xmin = lwr, xmax = u) 
   }
-  wInv <- inverse(wcdf, lower=lwr)
+  wInv <- suppressWarnings(inverse(wcdf, lower=lwr))
+  # warning: 'for infinite domains Gauss integration is applied'
   
   kdeTrans$xTrans <- kdeTrans$x
   # this is the bottleneck step:
@@ -67,52 +68,46 @@ miser <- function(x, n, k, hMeth, nbreak, w){
 # for w=1/x, k=3 or 16
 nVals <- c(50, 200)
 kVals <- c(2, 12)
+kVals2 <- c(3, 16)
 hMeths <- c('nrd0','SJ-ste')
-w <- function(x){ x }
 nbreak <- 2^8 # number of kernel estimation points
 # using 2^9 gives oly 1x10^-6 better mise for one example
 
-# recreate 1st part of table 1 from Barmi & Simonoff 2000
-pt1 <- proc.time()
-tab1 <- data.frame(matrix(ncol=5, nrow=0))
-for (n in nVals){
-  for (k in kVals){
-    for (hMeth in hMeths){
-      # when w(x)=x, then g is a chi-sq density of k+2
-      x <- rchisq(n=n, df=(k+2))
+# original study used 500 replicates but calculation is slow
+nreps <- 100
+pkgs <- c('pracma','GoFKernel')
+ncores <- detectCores() - 1
 
-      # original study used 500 replicates but calculation is slow
-      mises <- replicate(100, miser(x,n,k,hMeth,nbreak,w))
-      mise <- colMeans(t(mises))
-      newRow <- data.frame(hMeth, n, k, t(mise))
-      tab1 <- rbind(tab1, newRow)
-    }
+# recreate table 1 from Barmi & Simonoff 2000
+
+pt1 <- proc.time()
+registerDoParallel(ncores)
+tab1a <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
+  foreach(k=kVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% {
+    w <- function(x){ x }
+    x <- rchisq(n=n, df=(k+2))
+    mises <- replicate(nreps, miser(x,n,k,hMeth,nbreak,w))
+    mise <- colMeans(t(mises))
+    data.frame(hMeth, n, k, t(mise))
   }
-}
+tab1b <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
+  foreach(k=kVals2, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% {
+    w <- function(x){ 1/x }
+    x <- rchisq(n=n, df=(k-2))
+    mises <- replicate(nreps, miser(x,n,k,hMeth,nbreak,w))
+    mise <- colMeans(t(mises))
+    data.frame(hMeth, n, k, t(mise))
+  }
+stopImplicitCluster()
+
 pt2 <- proc.time()
 pt2 - pt1
-colnames(tab1) <- c('hMeth','n','k','MISEJones','MISEtrans')
+#colnames(tab1) <- c('hMeth','n','k','MISEJones','MISEtrans')
 
-# recreate 2nd part of table 1 from Barmi & Simonoff 2000
-kVals <- c(3, 16)
-w <- function(x){ 1/x }
-tab1b <- data.frame(matrix(ncol=5, nrow=0))
-for (n in nVals){
-  for (k in kVals){
-    for (hMeth in hMeths){
-      # when w(x)=1/x, then chi-sq has k-2
-      x <- rchisq(n=n, df=(k-2))
-      
-      # original study used 500 replicates but calculation is slow
-      mises <- replicate(100, miser(x,n,k,hMeth,nbreak,w))
-      mise <- colMeans(t(mises))
-      newRow <- data.frame(hMeth, n, k, t(mise))
-      tab1b <- rbind(tab1b, newRow)
-    }
-  }
-}
-colnames(tab1b) <- c('hMeth','n','k','MISEJones','MISEtrans')
-
+# TODO
+# use a true distribution other than chi-sq
+# use a non-monotonic bias function
+# introduce boundary bias
 
 # Empirical data ----------------------------------------------------------
 
