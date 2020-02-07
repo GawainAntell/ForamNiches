@@ -2,8 +2,6 @@ library(pracma)
 library(GoFKernel)
 library(doParallel)
 
-# Simulate data -----------------------------------------------------------
-
 transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   n <- length(x)
   muHat <- n * sum( w(x)^-1 )^-1
@@ -58,6 +56,8 @@ JonesEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   b <- max(kde$x)
   append(list(f=f, lower=a, upper=b), kde)
 }
+
+# Simulate for simple bias ------------------------------------------------
 
 # in Barmi & Simonoff 2000: n = 50 or 200
 # for w=x, true Chi-square distribution is k=2 or 12
@@ -130,10 +130,53 @@ tab1a$fmla <- 'w=x'
 
 # TODO
 # Use a true distribution other than chi-sq
-# Use a non-monotonic bias function: maybe 3rd order polynomial, polyfit(x, y, n=3)
 # Boundary reflection
 # Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
 
+
+
+# Simulate polynomial bias ------------------------------------------------
+
+#True distribution is chi-sq, df=5.
+# Bias function is 4-th order polynomial,
+# similar to foram sampling bias.
+# Positive for values from 0 to 10.
+w <- function(x){
+  x <- .3*(x-5.5) 
+  -0.8*x^4 + 0.7*x^3 + 1.5*x^2 - 2*x + 2
+}
+g <- function(x){
+  g1 <- function(x) w(x)*dchisq(x, df=5)
+  u <- integral(g1, 0, 10)
+  w(x)*dchisq(x, df=5)/u
+}
+n <- 50
+set.seed(10)
+x <- random.function(n=n, g, lower=0, upper=10)
+
+je <- JonesEst(x,w)
+mseJ <- function(x) (je$f(x) - dchisq(x, df=5))^2
+miseJ <- integral(mseJ, je$lower, je$upper)
+
+te <- transformEst(x,w)
+mseT <- function(x) (te$f(x) - dchisq(x, df=5))^2
+miseT <- integral(mseT, te$lower, te$upper)
+
+# without accounting for bias:
+kde <- density(x, kernel='gaussian', bw='nrd0', cut=0, n=2^8)
+f <- approxfun(kde$x, kde$y)
+mseBad <- function(x) (f(x) - dchisq(x, df=5))^2
+miseBad <- integral(mseBad, min(kde$x), max(kde$x))
+
+miseJ; miseT; miseBad
+
+xtrue <- rchisq(50, df=5)
+toss <- xtrue> 10
+xtrue <- xtrue[!toss]
+hist(xtrue, xlim=c(0,10), breaks=seq(0,10,by=1), freq=FALSE)
+hist(x, xlim=c(0,10), freq=FALSE)
+u <- seq(0,10,by=.1)
+plot(u,w(u))
 
 # Empirical data ----------------------------------------------------------
 
