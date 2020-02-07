@@ -4,10 +4,8 @@ library(doParallel)
 
 # Simulate data -----------------------------------------------------------
 
-# calculate MISE for chi-sq distribution with given n and df
-# based on data drawn with known bias, w
-miser <- function(x, n, k, hMeth, nbreak, w){
-  
+transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
+  n <- length(x)
   muHat <- n * sum( w(x)^-1 )^-1
   
   test <- c(is.infinite(w(0)), is.na(w(0)))
@@ -22,46 +20,43 @@ miser <- function(x, n, k, hMeth, nbreak, w){
   
   # kernel density estimation on transformed data
   # note that the authors used local quadratic likelihood instead
-  kdeTrans <- density(Y, kernel='gaussian', bw=hMeth, cut=0, n=nbreak)
+  kde <- density(Y, kernel='gaussian', bw=hMeth, cut=0, n=nbreak)
   
   # scale to integrate to one
-  kdeTrans$y <- muHat * kdeTrans$y
+  kde$y <- muHat * kde$y
   
   # Back-transform from the y=W(x) argument to x.
   # Build custom cdf function, since 
   # inverse() does not play well with ecdf (step fcn)
-  upr <- max(kdeTrans$x)
+  upr <- max(kde$x)
   cdf <- function(f, lower) {
     function(z) integral(f, lower, z)
   }
   wcdf <- cdf(f = w, lower = lwr)
   inv <- inverse(wcdf, lower = lwr, upper = upr)
   
-  kdeTrans$xTrans <- kdeTrans$x
-  # this is the bottleneck step:
-  kdeTrans$x <- sapply(kdeTrans$x, inv)
-  # plot(kdeTrans)
-  
-  # calculate MISE (minimum integrated squared error)
+  kde$xTrans <- kde$x
+  kde$x <- sapply(kde$x, inv)
   
   # if w(x) is undefined at 0, then min and max of X can off
   # (albeit only slightly) from values at which kernel can estimate 
-  fHatT <- approxfun(kdeTrans$x, kdeTrans$y)
-  seTrans <- function(u) (fHatT(u) - dchisq(u, df=k))^2
-  a <- min(kdeTrans$x)
-  b <- max(kdeTrans$x)
-  miseTrans <- integral(seTrans, a, b)
+  f <- approxfun(kde$x, kde$y)
+  a <- min(kde$x)
+  b <- max(kde$x)
   
-  # weighted kernel density estimation after Jones 1991
+  append(list(f=f, lower=a, upper=b), kde)
+}
+
+# weighted kernel density estimation after Jones 1991
+JonesEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   wts <- 1/w(x)
   wts <- wts/sum(wts)
-  kdeJ <- density(x, kernel='gaussian', bw=hMeth, cut=0, n=nbreak,
-                  weights=wts)
-  fhatJ <- approxfun(kdeJ$x, kdeJ$y)
-  seJ <- function(x) (fhatJ(x) - dchisq(x, df=k))^2
-  miseJ <- integral(seJ, a, b)
-  
-  c(miseJ, miseTrans)
+  kde <- density(x, kernel='gaussian', bw=hMeth, cut=0, n=nbreak,
+                 weights=wts)
+  f <- approxfun(kde$x, kde$y)
+  a <- min(kde$x)
+  b <- max(kde$x)
+  append(list(f=f, lower=a, upper=b), kde)
 }
 
 # in Barmi & Simonoff 2000: n = 50 or 200
@@ -70,12 +65,12 @@ miser <- function(x, n, k, hMeth, nbreak, w){
 nVals <- c(50, 200)
 kVals <- c(2, 12)
 kVals2 <- c(3, 16)
-hMeths <- c('nrd0','SJ-ste')
-nbreak <- 2^8 # number of kernel estimation points
+#hMeth <- c('nrd0','SJ-ste')
+#nbreak <- 2^8 # number of kernel estimation points
 # using 2^9 gives oly 1x10^-6 better mise for one example
 
 # original study used 500 replicates but calculation is slow
-nreps <- 100
+nreps <- 250
 pkgs <- c('pracma','GoFKernel')
 ncores <- detectCores() - 1
 
@@ -84,39 +79,61 @@ ncores <- detectCores() - 1
 pt1 <- proc.time()
 registerDoParallel(ncores)
 tab1a <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
-  foreach(hMeth=hMeths, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
   foreach(k=kVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% {
-    w <- function(x){ x }
-    x <- rchisq(n=n, df=(k+2))
-    mises <- replicate(nreps, miser(x,n,k,hMeth,nbreak,w))
-    mise <- colMeans(t(mises))
-    data.frame(hMeth, n, k, t(mise))
+    miser <- function(n,k){
+      w <- function(x){ x }
+      x <- rchisq(n=n, df=(k+2))
+      je <- JonesEst(x,w)
+      te <- transformEst(x,w)
+      mseJ <- function(x) (je$f(x) - dchisq(x, df=k))^2
+      miseJ <- integral(mseJ, je$lower, je$upper)
+      mseT <- function(x) (te$f(x) - dchisq(x, df=k))^2
+      miseT <- integral(mseT, te$lower, te$upper)
+      c(miseJ, miseT)
+    }
+    mises <- replicate(n=nreps, miser(n=n, k=k))
+    mise <- rowMeans(mises)
+    data.frame(n, k, t(mise))
   }
-tab1b <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
-  foreach(hMeth=hMeths, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
-  foreach(k=kVals2, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% {
-    w <- function(x){ 1/x }
-    x <- rchisq(n=n, df=(k-2))
-    mises <- replicate(nreps, miser(x,n,k,hMeth,nbreak,w))
-    mise <- colMeans(t(mises))
-    data.frame(hMeth, n, k, t(mise))
-  }
+# TODO:
+# Add tweak to uniroot function within inverse, for badly behaved empirical data:
+# SJ-ste, n=200, k=16, w=1/x
+# (or skip over error: 'f() values at end points not of opposite sign').
+#tab1b <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
+  #  foreach(hMeth=hMeths, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
+#  foreach(k=kVals2, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% {
+#    miser <- function(n,k){
+#      w <- function(x){ 1/x }
+#      x <- rchisq(n=n, df=(k-2))
+#      je <- JonesEst(x,w)
+#      te <- transformEst(x,w)
+#      mseJ <- function(x) (je$f(x) - dchisq(x, df=k))^2
+#      miseJ <- integral(mseJ, je$lower, je$upper)
+#      mseT <- function(x) (te$f(x) - dchisq(x, df=k))^2
+#      miseT <- integral(mseT, te$lower, te$upper)
+#      c(miseJ, miseT)
+#    }
+#    mises <- replicate(n=nreps, miser(n=n, k=k))
+#    mise <- rowMeans(mises)
+#    data.frame(n, k, t(mise))
+#  }
 stopImplicitCluster()
 
 pt2 <- proc.time()
 pt2 - pt1 
 
-colnames(tab1a) <- colnames(tab1b) <- 
-  c('hMeth','n','k','MISEJones','MISEtrans')
+colnames(tab1a) <- # colnames(tab1b) <- 
+  c('n','k','MISEJones','MISEtrans')
 tab1a$fmla <- 'w=x'
-tab1b$fmla <- 'w=1/x'
-tab1 <- rbind(tab1a,tab1b)
-# write.csv(tab1b, 'Data/BarmiSimonoff_sim_replications.csv', row.names=FALSE)
+#tab1b$fmla <- 'w=1/x'
+# write.csv(tab1a, 'Data/BarmiSimonoff_sim_250reps.csv', row.names=FALSE)
 
 # TODO
-# use a true distribution other than chi-sq
-# use a non-monotonic bias function
-# introduce boundary bias
+# Use a true distribution other than chi-sq
+# Use a non-monotonic bias function: maybe 3rd order polynomial, polyfit(x, y, n=3)
+# Boundary reflection
+# Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
+
 
 # Empirical data ----------------------------------------------------------
 
