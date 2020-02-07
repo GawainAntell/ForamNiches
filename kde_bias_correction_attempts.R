@@ -30,25 +30,26 @@ miser <- function(x, n, k, hMeth, nbreak, w){
   # Back-transform from the y=W(x) argument to x.
   # Build custom cdf function, since 
   # inverse() does not play well with ecdf (step fcn)
-  wcdf <- function(u){
-    integral(w, xmin = lwr, xmax = u) 
+  upr <- max(kdeTrans$x)
+  cdf <- function(f, lower) {
+    function(z) integral(f, lower, z)
   }
-  wInv <- suppressWarnings(inverse(wcdf, lower=lwr))
-  # warning: 'for infinite domains Gauss integration is applied'
+  wcdf <- cdf(f = w, lower = lwr)
+  inv <- inverse(wcdf, lower = lwr, upper = upr)
   
   kdeTrans$xTrans <- kdeTrans$x
   # this is the bottleneck step:
-  kdeTrans$x <- sapply(kdeTrans$x, wInv)
+  kdeTrans$x <- sapply(kdeTrans$x, inv)
   # plot(kdeTrans)
   
   # calculate MISE (minimum integrated squared error)
   
-  # if w(x) is undefined at 0, then min(X) can be larger
-  # (albeit only slightly) than values at which kernel can estimate 
-  a <- min(kdeTrans$x) 
-  b <- max(x)
+  # if w(x) is undefined at 0, then min and max of X can off
+  # (albeit only slightly) from values at which kernel can estimate 
   fHatT <- approxfun(kdeTrans$x, kdeTrans$y)
   seTrans <- function(u) (fHatT(u) - dchisq(u, df=k))^2
+  a <- min(kdeTrans$x)
+  b <- max(kdeTrans$x)
   miseTrans <- integral(seTrans, a, b)
   
   # weighted kernel density estimation after Jones 1991
@@ -83,6 +84,7 @@ ncores <- detectCores() - 1
 pt1 <- proc.time()
 registerDoParallel(ncores)
 tab1a <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
+  foreach(hMeth=hMeths, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
   foreach(k=kVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% {
     w <- function(x){ x }
     x <- rchisq(n=n, df=(k+2))
@@ -91,6 +93,7 @@ tab1a <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
     data.frame(hMeth, n, k, t(mise))
   }
 tab1b <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
+  foreach(hMeth=hMeths, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
   foreach(k=kVals2, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar% {
     w <- function(x){ 1/x }
     x <- rchisq(n=n, df=(k-2))
@@ -101,8 +104,14 @@ tab1b <- foreach(n=nVals, .packages=pkgs, .combine=rbind, .inorder=FALSE) %:%
 stopImplicitCluster()
 
 pt2 <- proc.time()
-pt2 - pt1
-#colnames(tab1) <- c('hMeth','n','k','MISEJones','MISEtrans')
+pt2 - pt1 
+
+colnames(tab1a) <- colnames(tab1b) <- 
+  c('hMeth','n','k','MISEJones','MISEtrans')
+tab1a$fmla <- 'w=x'
+tab1b$fmla <- 'w=1/x'
+tab1 <- rbind(tab1a,tab1b)
+# write.csv(tab1b, 'Data/BarmiSimonoff_sim_replications.csv', row.names=FALSE)
 
 # TODO
 # use a true distribution other than chi-sq
