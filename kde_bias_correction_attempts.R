@@ -1,6 +1,10 @@
 library(pracma)
 library(GoFKernel)
 library(doParallel)
+library(ggplot2)
+library(tidyr)
+# TODO
+# Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
 
 transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   n <- length(x)
@@ -56,6 +60,9 @@ JonesEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   b <- max(kde$x)
   append(list(f=f, lower=a, upper=b), kde)
 }
+
+# revised version of GoFKernel boundary reflection function
+source('GSA_GoFKernel_reflection_fcn.R')
 
 # Simulate for simple bias ------------------------------------------------
 
@@ -128,13 +135,6 @@ tab1a$fmla <- 'w=x'
 #tab1b$fmla <- 'w=1/x'
 # write.csv(tab1a, 'Data/BarmiSimonoff_sim_250reps.csv', row.names=FALSE)
 
-# TODO
-# Use a true distribution other than chi-sq
-# Boundary reflection
-# Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
-
-
-
 # Simulate polynomial bias ------------------------------------------------
 
 #True distribution is chi-sq, df=5.
@@ -150,7 +150,9 @@ g <- function(x){
   u <- integral(g1, 0, 10)
   w(x)*dchisq(x, df=5)/u
 }
-n <- 50
+
+for (n in c(50, 200)){
+  
 set.seed(10)
 x <- random.function(n=n, g, lower=0, upper=10)
 
@@ -168,15 +170,81 @@ f <- approxfun(kde$x, kde$y)
 mseBad <- function(x) (f(x) - dchisq(x, df=5))^2
 miseBad <- integral(mseBad, min(kde$x), max(kde$x))
 
-miseJ; miseT; miseBad
+# miseJ; miseT; miseBad
 
-xtrue <- rchisq(50, df=5)
-toss <- xtrue> 10
-xtrue <- xtrue[!toss]
-hist(xtrue, xlim=c(0,10), breaks=seq(0,10,by=1), freq=FALSE)
-hist(x, xlim=c(0,10), freq=FALSE)
-u <- seq(0,10,by=.1)
-plot(u,w(u))
+xmn <- min(x)
+xmx <- max(x)
+u <- seq(xmn,xmx,by=.1)
+kdeEsts <- data.frame(x=u)
+kdeEsts$true <- dchisq(u, df=5)
+kdeEsts$g <- g(u)
+kdeEsts$je <- je$f(u)
+kdeEsts$te <- te$f(u)
+kdeEsts$biased <- f(u)
+estsLong <- pivot_longer(kdeEsts, cols=c('true','g','biased','je','te'), 
+                         names_to='method')
+estsLong$method <- factor(estsLong$method, levels=c('true','g','biased','je','te'))
+numNa <- nrow(estsLong) - length(x)
+estsLong$rugHack <- c(x, rep(NA, numNa))
+ymx <- max(estsLong$value, na.rm=TRUE) * 1.05
+colr <- c('black','grey50','blue','orange','red')
+names(colr) <- c('true','g','biased','je','te')
+
+polyBiasP <- 
+  ggplot(data=estsLong, aes(x=x)) +
+  theme_bw() +
+  scale_y_continuous(name='Density', limits=c(0,ymx), expand=c(0,0)) +
+  scale_x_continuous(limits=c(xmn,xmx), expand=c(0,0)) +
+  geom_line(aes(y=value, colour=method)) +
+  geom_rug(aes(x=rugHack), sides='b') + 
+  scale_colour_manual(values=colr)
+
+txt <- c(paste('biased MISE =', round(miseBad,4)),
+         paste('je MISE =', round(miseJ,4)),
+         paste('te MISE =', round(miseT,4))
+)
+polyBiasP <- polyBiasP + 
+  annotate('text', x=rep(xmx-1.5,3), y=ymx-c(0.025, 0.05, 0.075), label=txt)
+
+polyNm <- paste0('Figs/KDE_example_chisq5_',n,'obs.pdf')
+pdf(polyNm, width=6, height=4)
+  polyBiasP
+dev.off()
+
+}
+
+# Boundary reflection -----------------------------------------------------
+
+# use the same polynomial bias as in previous section
+
+# simulate a broad distribution that extends below 0
+set.seed(20)
+x <- rchisq(50, df=8) - 5
+hist(x, breaks=10)
+
+lower <- 0
+upper <- 10
+outside <- which(x < lower | x > upper)
+x <- x[-outside]
+
+# Assume artificial boundaries at x = 0 and x = 10
+# Do not specify cut; leave at default (3). This means
+# the function will allow gradual tapering of density beyond 
+# the reflected limits. The returned values will already
+# be truncated to the given interval.
+# Note that the given interval may be larger than the range of X,
+# in which case the returned density will be over a larger range
+# than if cut=0 were specified.
+kdeRefl <- density.reflected(x, lower=lower, upper=upper, 
+                             kernel='gaussian')
+
+kdeRaw <- density(x, kernel='gaussian', cut=0)
+
+# compare true density, and kernel estimates w vs. w/o reflection
+y <- dchisq(seq(lower+5, upper+5, by=0.1), df=8)
+plot(seq(lower, upper, by=0.1), y, 'l')
+plot(kdeRaw)
+plot(kdeRefl, xlim=c(min(x), max(x)))
 
 # Empirical data ----------------------------------------------------------
 
