@@ -6,6 +6,9 @@ library(tidyr)
 # TODO
 # Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
 
+# TODO
+# Figure out why the lower and upper bound of transformed x (from inverse) is too high at big n
+# Add tweak to uniroot function within inverse, for badly behaved empirical data
 transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   n <- length(x)
   muHat <- n * sum( w(x)^-1 )^-1
@@ -137,7 +140,7 @@ tab1a$fmla <- 'w=x'
 
 # Simulate polynomial bias ------------------------------------------------
 
-#True distribution is chi-sq, df=5.
+# True distribution is chi-sq, df=5.
 # Bias function is 4-th order polynomial,
 # similar to foram sampling bias.
 # Positive for values from 0 to 10.
@@ -208,19 +211,19 @@ polyBiasP <- polyBiasP +
 
 polyNm <- paste0('Figs/KDE_example_chisq5_',n,'obs.pdf')
 pdf(polyNm, width=6, height=4)
-  polyBiasP
+  print(polyBiasP)
 dev.off()
 
 }
 
 # Boundary reflection -----------------------------------------------------
 
-# use the same polynomial bias as in previous section
-
+for (n in c(50, 200)){
+  
 # simulate a broad distribution that extends below 0
 set.seed(20)
-x <- rchisq(50, df=8) - 5
-hist(x, breaks=10)
+x <- rchisq(n, df=8) - 5
+# hist(x, breaks=10)
 
 lower <- 0
 upper <- 10
@@ -237,14 +240,50 @@ x <- x[-outside]
 # than if cut=0 were specified.
 kdeRefl <- density.reflected(x, lower=lower, upper=upper, 
                              kernel='gaussian')
-
+fRefl <- approxfun(kdeRefl$x, kdeRefl$y)
 kdeRaw <- density(x, kernel='gaussian', cut=0)
+fRaw <- approxfun(kdeRaw$x, kdeRaw$y)
 
-# compare true density, and kernel estimates w vs. w/o reflection
-y <- dchisq(seq(lower+5, upper+5, by=0.1), df=8)
-plot(seq(lower, upper, by=0.1), y, 'l')
-plot(kdeRaw)
-plot(kdeRefl, xlim=c(min(x), max(x)))
+xmn <- min(x)
+xmx <- max(x)
+u <- seq(xmn,xmx,by=.1)
+kdeEsts <- data.frame(x=u)
+kdeEsts$true <- dchisq(u+5, df=8)
+kdeEsts$refl <- fRefl(u)
+kdeEsts$unrefl <- fRaw(u)
+
+meths <- c('true','refl','unrefl')
+estsLong <- pivot_longer(kdeEsts, cols=meths, 
+                         names_to='method')
+estsLong$method <- factor(estsLong$method, levels=meths)
+numNa <- nrow(estsLong) - length(x)
+estsLong$rugHack <- c(x, rep(NA, numNa))
+ymx <- max(estsLong$value, na.rm=TRUE) * 1.05
+colr <- c('black','orange','blue')
+names(colr) <- meths
+
+reflectP <- 
+  ggplot(data=estsLong, aes(x=x)) +
+  theme_bw() +
+  scale_y_continuous(name='Density', limits=c(0,ymx), expand=c(0,0)) +
+  scale_x_continuous(limits=c(xmn,xmx), expand=c(0,0)) +
+  geom_line(aes(y=value, colour=method)) +
+  geom_rug(aes(x=rugHack), sides='b') + 
+  scale_colour_manual(values=colr)
+
+#txt <- c(paste('biased MISE =', round(miseBad,4)),
+#         paste('je MISE =', round(miseJ,4)),
+#         paste('te MISE =', round(miseT,4))
+#)
+#reflectP <- reflectP + 
+#  annotate('text', x=rep(xmx-1.5,3), y=ymx-c(0.025, 0.05, 0.075), label=txt)
+
+reflNm <- paste0('Figs/KDE_example_chisq8shifted_trunc_',length(x),'obs.pdf')
+pdf(reflNm, width=6, height=4)
+print(reflectP)
+dev.off()
+
+}
 
 # Empirical data ----------------------------------------------------------
 
