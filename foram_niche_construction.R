@@ -12,7 +12,7 @@ library(ggplot2)
 library(tidyr)
 
 # set whether or not to truncate to standard global temperature range
-doTrunc <- FALSE
+doTrunc <- TRUE
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
@@ -304,48 +304,6 @@ if (doTrunc){
 }
 write.csv(outDf, outNm, row.names = FALSE)
 
-# Simulate uniform niche spp ----------------------------------------------
-
-df <- outDf 
-
-# if starting from top of script, run the following lines to jump in from here:
-  # df <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv',stringsAsFactors=FALSE)
-  # bins <- unique(df$bin)
-  # day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
-
-spp <- unique(df$species)
-
-sampBool <- df$species=='sampled'
-samp <- df[sampBool,]
-
-simNiche <- function(s, b, dat, sCol, bCol, samp){
-  spBinBool <- dat[,sCol]==s & dat[,bCol]==b
-  n <- sum(spBinBool)
-  if (n>0){
-    sampBinBool <- samp[,bCol]==b
-    sampBin <- samp[sampBinBool,]
-    rows <- 1:nrow(sampBin)
-    rows4sim <- sample(rows, n)
-    simDat <- sampBin[rows4sim,]
-    simDat[,sCol] <- s
-    return(simDat)
-  }
-}
-
-simOverBins <- function(b){
-  simL <- lapply(spp, b=b, simNiche, dat=df, sCol='species', bCol='bin', samp=samp)
-  simDf <- do.call(rbind, simL)
-}
-simL <- lapply(bins, simOverBins)
-simDf <- do.call(rbind, simL)
-
-if (doTrunc){
-  simNm <- paste0('Data/uniform_niche_sim_MAT_occs_latlong_8ka_trunc_',day,'.csv')
-} else {
-  simNm <- paste0('Data/uniform_niche_sim_MAT_occs_latlong_8ka_',day,'.csv')
-}
-write.csv(simDf, simNm, row.names=FALSE)
-
 # Niche summary -----------------------------------------------------------
 
 source('GSA_custom_ecospat_fcns.R')
@@ -427,10 +385,6 @@ eList <- lapply(envCol, kdeLoop, dat=df)
 nich <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
               suffixes=paste0('_', envCol))
 
-simNichL <- lapply(envCol, kdeLoop, dat=simDf)
-simNich <- merge(simNichL[[1]], simNichL[[2]], by=c('sp','bin'), no.dups=TRUE, 
-                 suffixes=paste0('_', envCol))
-
 # * Non-KDE niche summary -------------------------------------------------
 
 # Need mean, variance, sample size, and age of trait values (MAT) for each sp & bin
@@ -474,19 +428,6 @@ if (doTrunc){
 }
 write.csv(fullSum, sumNm, row.names=FALSE)
 
-rawSimL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=simDf, binCol='bin', sCol='species', traitCol=envCol)
-  tempDf <- do.call(rbind, temp)
-})
-rawSim <- do.call(rbind, rawSimL)
-fullSim <- merge(simNich, rawSim)
-if (doTrunc){
-  simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_trunc_',day,'.csv')
-} else {
-  simNm <- paste0('Data/uniform_niche_sim_sumry_metrics_',day,'.csv')
-}
-write.csv(fullSim, simNm, row.names=FALSE)
-
 # Inter-specific overlap --------------------------------------------------
 
 interSppD <- function(b, df, env, R, h.method){
@@ -524,18 +465,9 @@ interLong <- foreach(e=envCol, .packages='pracma', .combine=rbind, .inorder=FALS
   foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
     interSppD(b=bin, df=df, env=e, R=R, h.method=h.method)
   }
-simLong <- foreach(e=envCol, .packages='pracma', .combine=rbind, .inorder=FALSE) %:%
-  foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
-    interSppD(b=bin, df=simDf, env=e, R=R, h.method=h.method)
-  }
 stopImplicitCluster()
 
 interWide <- spread(interLong, envVar, h)
 colnames(interWide)[3+1:length(envCol)] <- paste0('h_', envCol)
 interSppNm <- paste0('Data/foram_species_pairs_KDE_H_', day, '.csv')
 write.csv(interWide, interSppNm, row.names=FALSE)
-
-simWide <- spread(simLong, envVar, h)
-colnames(simWide)[3+1:length(envCol)] <- paste0('h_', envCol)
-interSimNm <- paste0('Data/uniform_niche_sim_pairs_KDE_H_', day, '.csv')
-write.csv(simWide, interSimNm, row.names=FALSE)
