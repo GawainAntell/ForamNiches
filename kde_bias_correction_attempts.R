@@ -1,10 +1,14 @@
 library(pracma)
 library(GoFKernel)
 library(doParallel)
-library(ggplot2)
 library(tidyr)
-# TODO
-# Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
+library(ggplot2)
+library(cowplot)
+library(grid)
+library(gridExtra)
+
+# revised version of GoFKernel boundary reflection function
+source('GSA_GoFKernel_reflection_fcn.R')
 
 # TODO
 # Figure out why the lower and upper bound of transformed x (from inverse) is too high at big n
@@ -53,19 +57,37 @@ transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
 }
 
 # weighted kernel density estimation after Jones 1991
-JonesEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
+# TODO
+# Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
+JonesEst <- function(x, w, reflect=FALSE, ...){
   wts <- 1/w(x)
   wts <- wts/sum(wts)
-  kde <- density(x, kernel='gaussian', bw=hMeth, cut=0, n=nbreak,
-                 weights=wts)
+  
+  args <- list(...)
+  if ('from' %in% names(args)){
+    from <- args$from
+  } else {
+    from <- min(x)
+  }
+  if ('to' %in% names(args)){
+    to <- args$to
+  } else {
+    to <- max(x)
+  }
+  
+  if (reflect){
+    kde <- density.reflected(x, lower = from, upper = to,
+                             weights = wts, ...)
+  } else {
+    kde <- density(x, from = from, to = to, 
+                   weights = wts, ...)
+  }
+  
   f <- approxfun(kde$x, kde$y)
   a <- min(kde$x)
   b <- max(kde$x)
   append(list(f=f, lower=a, upper=b), kde)
 }
-
-# revised version of GoFKernel boundary reflection function
-source('GSA_GoFKernel_reflection_fcn.R')
 
 # Simulate for simple bias ------------------------------------------------
 
@@ -238,10 +260,9 @@ x <- x[-outside]
 # Note that the given interval may be larger than the range of X,
 # in which case the returned density will be over a larger range
 # than if cut=0 were specified.
-kdeRefl <- density.reflected(x, lower=lower, upper=upper, 
-                             kernel='gaussian')
+kdeRefl <- density.reflected(x, lower=lower, upper=upper)
 fRefl <- approxfun(kdeRefl$x, kdeRefl$y)
-kdeRaw <- density(x, kernel='gaussian', cut=0)
+kdeRaw <- density(x, from=lower, to=upper)
 fRaw <- approxfun(kdeRaw$x, kdeRaw$y)
 
 xmn <- min(x)
@@ -290,72 +311,66 @@ dev.off()
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
 occ <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv', stringsAsFactors=FALSE)
-bins <- unique(occ$bin) 
-
-source('GSA_custom_ecospat_fcns.R')
-nbins <- length(bins)
-h.method <- "nrd0" # "SJ-ste" # "ucv"
-R <- 2^8
-
+focalB <- seq(100, 700, by=200)
 env <- 'temp_ym_0m'
 spp <- unique(occ$species)
 xmax <- max(occ[,env])
 xmin <- min(occ[,env])
 
-b <- 100; s <-'sampled'#  spp[2]
+#source('GSA_custom_ecospat_fcns.R')
 
-spRows <- which(occ$bin==b & occ$species==s)
-sp <- 
-  samp <- occ[spRows,env]
-
-# Estimate kernel density -------------------------------------------------
-
-#kdeNiche <- 
-#  function (sp, samp=NULL, xmax, xmin, R, h.method="nrd0", weight=FALSE) {
-sp <- as.matrix(sp)
-x <- seq(from = xmin, to = xmax, length.out = R)
-
-if (weight==TRUE){
-  samp <- as.matrix(samp)
-  kdeSamp <- density(samp, kernel='gaussian', bw=h.method, 
-                     from=xmin, to=xmax, n=R)
-  # integrate in segments of x; use these as weights for species KDE
-  sampFun <- approxfun(x, kdeSamp$y)
-  bounds <- data.frame(a=x[-length(x)], b=x[-1])
-  pmf <- apply(bounds, 1, function(ab){
-    integral(sampFun, ab[1], ab[2])
-  })
-  bounds$pmf <- pmf
+for (b in focalB){
+  # estimate bias function (w) from sampling distribution, with boundary reflection
+  sampRows <- which(occ$bin==b & occ$species=='sampled')
+  samp <- occ[sampRows,env]
+  densW <- density.reflected(samp, # kernel='gaussian', bw='nrd0', 
+                             from=xmin, to=xmax, n = 2^9
+  ) 
+  w <- approxfun(densW$x, densW$y)
   
-  # find weight for locations of observations
-  wt <- sapply(sp, function(u){
-    r <- which(bounds$a <= u & bounds$b > u)
-    1/bounds$pmf[r]
-  } )
-  wt <- wt/sum(wt)
-  kdeSp <- density(sp, kernel='gaussian', bw=h.method, 
-                   from=xmin, to=xmax, n=R,
-                   weights=wt)
-} else {
-  kdeSp <- density(sp, kernel='gaussian', bw=h.method, 
-                   from=xmin, to=xmax, n=R)
-}
-
-plot(kdeSamp)
-plot(kdeSp)
-
-# format function output
-l <- list()
-l$density <- kdeSp$y
-
-# Add Holland 1995 niche summary metrics to output:
-# peak abundance, preferred environment, & tolerance
-l$pa <- max(kdeSp$y)
-pe.pos <- which.max(kdeSp$y)
-l$pe <- x[pe.pos]
-
-# To approximate the KDE as a function, one also needs x-values:
-l$x <- x
-
-#    return(l)
-#  }
+  plotL <- list()
+  for (s in spp){
+    # construct KDE for the sp, with boundary reflection and Jones' correction
+    spRows <- which(occ$bin==b & occ$species==s)
+    sp <- occ[spRows,env]
+    
+    kdeSp <- tryCatch(
+      JonesEst(sp, w, reflect = TRUE, from = xmin, to = xmax),
+      error = function(err){ list() }
+    ) 
+    if (length(kdeSp)==0){ next }
+    pePos <- which.max(kdeSp$y)
+    kdeSp$pe <- kdeSp$x[pePos]
+    
+    # save a plot of the KDE
+    plotDat <- data.frame(x=kdeSp$x, kd=kdeSp$y)
+    nlab <- paste0('n=', length(sp))
+    numNa <- nrow(plotDat) - length(sp)
+    plotDat$rugHack <- c(sp, rep(NA, numNa))
+    sPlot <- 
+      ggplot(data=plotDat, aes(x=x, y=kd)) +
+      theme_bw() +
+      ggtitle(s) +
+      geom_area(fill='khaki1') +
+      geom_line() +
+      geom_segment(x=kdeSp$pe, xend=kdeSp$pe, y=0, yend=1, colour='red') +
+      geom_segment(x=mean(sp), xend=mean(sp), y=0, yend=1, colour='blue') +
+      geom_hline(yintercept=0) +
+      geom_rug(aes(x=rugHack), sides='b', length=unit(0.045, "npc")) + 
+      scale_x_continuous(expand=c(0,0)) +
+      theme(axis.title.x = element_blank(),
+            axis.title.y = element_blank(),
+            plot.title = element_text(size=9))
+      sPlot <- sPlot +
+        geom_text(label=nlab, size=3, # fontface=1,
+                  x=3, y=0.9*max(plotDat$kd))
+      plotL <- append(plotL, list(sPlot))
+  } # loop through species
+  
+  # print page of plots
+  pg <- plot_grid(plotlist=plotL, nrow=6)
+  kdeNm <- paste0('Figs/KDE_all_spp_corrected_',b,'ka_',day,'.pdf')
+  pdf(kdeNm, width=8.5, height=11)
+    grid.arrange(arrangeGrob(pg))
+  dev.off()
+} # loop through bins
