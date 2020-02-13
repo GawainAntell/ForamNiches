@@ -16,6 +16,8 @@ doTrunc <- TRUE
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
+# OPTION: skip to section 'Niche summary'
+
 # Data import -------------------------------------------------------------
 
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
@@ -308,51 +310,69 @@ write.csv(outDf, outNm, row.names = FALSE)
 
 source('GSA_custom_ecospat_fcns.R')
 
+# if not running any sections above, load the data:
+outDf <- read.csv("Data/foram_MAT_occs_latlong_8ka_trunc_200213.csv",
+                  stringsAsFactors = FALSE)
+allSpp <- unique(outDf$species)
+keepSpp <- setdiff(allSpp, 'sampled')
+bins <- unique(outDf$bin)
 nbins <- length(bins)
-h.method <- "nrd0" # "SJ-ste" # "ucv"
-R <- 2^8
+envCol <- c("temp_ym_hab","temp_ym_0m")
 
 # * KDE niche summary -----------------------------------------------------
 
 # Output niche overlap (though time), peak abundance, preferred enviro, & tolerance
-nicher <- function(dat, b1, b2, sp, env, R, h.method){
-  xmin <- min(dat[,env])
-  xmax <- max(dat[,env])
+nicher <- function(dat, b1, b2, s, env, xmn, xmx,
+                   w1 = NULL, w2 = NULL, reflect = TRUE, ...){
   
-  sp1rows <- which(dat$species==sp & dat$bin==b1)
+  sp1rows <- which(dat$species==s & dat$bin==b1)
   sp1 <- dat[sp1rows,env]
   
-  sp2rows <- which(dat$species==sp & dat$bin==b2)
+  sp2rows <- which(dat$species==s & dat$bin==b2)
   sp2 <- dat[sp2rows,env]
   
-  # for each species at time i and i+1
-  z1 <- tryCatch(
-    kdeNiche(sp=sp1, xmax=xmax, xmin=xmin, R=R, h.method=h.method),
-    error = function(err){ list() }
-  ) 
-  z2 <- tryCatch(
-    kdeNiche(sp=sp2, xmax=xmax, xmin=xmin, R=R, h.method=h.method),
-    error = function(err){ list() }
-  ) 
+  noWeight <- any(is.null(w1), is.null(w2))
+  if (! noWeight){
+    d1 <- tryCatch(
+      JonesEst(sp1, w = w1, reflect = reflect, from = xmn, to = xmx, ...),
+      error = function(err){ list() }
+    ) 
+    d2 <- tryCatch(
+      JonesEst(sp2, w = w2, reflect = reflect, from = xmn, to = xmx, ...),
+      error = function(err){ list() }
+    ) 
+  } else {
+    # use unweighted sampling, either regular density or reflected:
+    if (reflect){
+      d1 <- tryCatch(
+        density.reflected(sp1, lower = xmn, upper = xmx, ...),
+      )
+      d2 <- tryCatch(
+        density.reflected(sp2, lower = xmn, upper = xmx, ...),
+      )
+    } else {
+      d1 <- tryCatch(
+        density(sp1, from = xmn, to = xmx, ...),
+      )
+      d2 <- tryCatch(
+        density(sp2, from = xmn, to = xmx, ...),
+      )
+    }
+  }
   
   # the species may be absent in one or both bins, in which case z is an empty list
-  if (length(z1)==0){
-    data.frame(bin=NA, sp=NA, n=NA, h=NA,
-  #             errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
-               pa=NA, pe=NA, tol=NA)
+  if (length(d1)==0){
+    data.frame(bin=NA, sp=NA, n=NA, h=NA, pa=NA, pe=NA)
     
   } else {
     n <- length(sp1rows)
-    if (length(z2)==0){
-      data.frame(bin=b1, sp=sp, n=n, h=NA,
-  #               errBaseLin=NA, errBaseSpl=NA, errSimpLin=NA, errSimpSpl=NA, errTrapLin=NA,
-                 pa=z1$pa, pe=z1$pe, tol=z1$t)
+    stats <- nichStats(d1)
+    
+    if (length(d2)==0){
+      data.frame(bin=b1, sp=s, n=n, h=NA, t(stats))
     } else{
-   #   err <- data.frame(sumErr(z1, z2))
-      h <- hell(z1, z2) 
-      data.frame(bin=b1, sp=sp, n=n, h=h,
-             #    err,
-                 pa=z1$pa, pe=z1$pe, tol=z1$t)
+      h <- hell(d1, d2) 
+      data.frame(bin=b1, sp=s, n=n, h=h, t(stats))
     }
   }
 }
@@ -362,26 +382,44 @@ bPairs <- cbind(bins[-1], bins[-length(bins)])
 # for the most recent time bin, it's not possible to calculate overlap
 # (because no modern data are included), but include it anyway
 # so that the standing niche at the last time bin is calculated
-recent <- cbind(4, NA)
-bPairs <- rbind(recent, bPairs)
+  #recent <- cbind(4, NA)
+  #bPairs <- rbind(recent, bPairs)
+# TODO: actually the modern is a problem because there's no weight for b2
 
 # loop over time bins over species over environmental variables
 kdeLoop <- function(e,dat){
-  sList <- lapply(spp, function(s){
-    bList <- apply(bPairs, 1, function(x){
-      nicher(dat=dat, b1=x[1], b2=x[2], sp=s, env=envCol, R=R, h.method=h.method)
+  xmn <- min(dat[,e])
+  xmx <- max(dat[,e])
+  
+  bList <- apply(bPairs, 1, function(x){
+    # estimate bias function for each time bin
+    # based on sampling distribution, with boundary reflection
+    sampRows1 <- which(dat$bin==x[1] & dat$species=='sampled')
+    sampRows2 <- which(dat$bin==x[2] & dat$species=='sampled')
+    samp1 <- dat[sampRows1,e]
+    samp2 <- dat[sampRows2,e]
+    densSamp1 <- density.reflected(samp1, from=xmn, to=xmx) 
+    densSamp2 <- density.reflected(samp2, from=xmn, to=xmx) 
+    w1 <- approxfun(densSamp1$x, densSamp1$y)
+    w2 <- approxfun(densSamp2$x, densSamp2$y)
+    
+    sList <- lapply(keepSpp, function(s){
+      nicher(dat = dat, b1 = x[1], b2 = x[2], s = s, env = e, 
+             w1 = w1, w2 = w2, xmn = xmn, xmx = xmx)
     })
-    do.call(rbind, bList)
+    do.call(rbind, sList)
   })
-  sDf <- do.call(rbind, sList)
+  sDf <- do.call(rbind, bList)
   # remove NA rows (if a species is not sampled in the focal bin)
   nas <- is.na(sDf$bin)
   sDf[!nas,]
 }
 
-# TODO: could convert lapply here or within kdeLoop to parallel as below 
-# in the species-pairs overlap calculations
-eList <- lapply(envCol, kdeLoop, dat=df)
+eList <- lapply(envCol, kdeLoop, dat=outDf)
+# Note: might be weird/problematic to truncate based on surface temp,
+# but then use in-habitat temp for niches. Temps at depth can get colder
+# than the standardised lower bound from surface data.
+# Perhaps an alternative to surface and in-habitat temp is to use MLD temp.
 nich <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
               suffixes=paste0('_', envCol))
 
@@ -413,8 +451,8 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
   return(rtrn)
 }
 
-rawSumL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=df, binCol='bin', sCol='species', traitCol=envCol)
+rawSumL <- lapply(keepSpp, function(s){
+  temp <- lapply(bins[-1], sumup, s=s, dat=outDf, binCol='bin', sCol='species', traitCol=envCol)
   tempDf <- do.call(rbind, temp)
 })
 rawSum <- do.call(rbind, rawSumL)
@@ -430,18 +468,23 @@ write.csv(fullSum, sumNm, row.names=FALSE)
 
 # Inter-specific overlap --------------------------------------------------
 
-interSppD <- function(b, df, env, R, h.method){
-  xmax <- max(df[,env])
-  xmin <- min(df[,env])
+interSppD <- function(b, df, env){
+  xmx <- max(df[,env])
+  xmn <- min(df[,env])
   
   bSppRows <- which(df$species!='sampled' & df$bin==b)
   bSpp <- unique(df$species[bSppRows])
+  
+  bBool <- df$bin==b
+  bSamp <- df[bBool,env]
+  sampDens <- density.reflected(bSamp, from=xmn, to=xmx)
+  w <- approxfun(sampDens$x, sampDens$y)
   
   # Construct KDE of all species
   kdeL <- lapply(bSpp, function(s){
     spRows <- which(df$species==s & df$bin==b)
     sp1 <- df[spRows,env]
-    z <- kdeNiche(sp1, xmax=xmax, xmin=xmin, R=R, h.method=h.method)
+    d <- JonesEst(sp1, w = w, from = xmn, to = xmx, reflect = TRUE)
   }
   )
   names(kdeL) <- bSpp
@@ -463,7 +506,7 @@ interSppD <- function(b, df, env, R, h.method){
 registerDoParallel(ncores)
 interLong <- foreach(e=envCol, .packages='pracma', .combine=rbind, .inorder=FALSE) %:%
   foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
-    interSppD(b=bin, df=df, env=e, R=R, h.method=h.method)
+    interSppD(b=bin, df=outDf, env=e)
   }
 stopImplicitCluster()
 
