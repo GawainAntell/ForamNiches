@@ -69,7 +69,7 @@ nich <- splitSpp[keepBool,]
 # Evo models --------------------------------------------------------------
 # TODO: use sampled environment from same depth as species
 
-evoFit <- function(s, sampStats, nmods='nine'){
+evoFit <- function(s, sampStats, nmods='four'){
   mNm <- sampStats[1]
   sdNm <- sampStats[2]
   spBool <- nich$sp==s
@@ -158,8 +158,12 @@ table(mods$bestMod)
 
 # build a giant loop (across multiple sections of code)
 # to export every plot for each env variable in turn
-for (v in envVars){
-  vShrt <- paste(strsplit(v,'_')[[1]], collapse='')
+# for (v in envVars){
+v <- 'temp_ym_0m'
+# See note on niche construction script: if truncating temp by surface values,
+# it doesn't make sense to use in-habitat temperature downstream.
+
+vShrt <- paste(strsplit(v,'_')[[1]], collapse='')
   
 # Spp vs sampling evo mode ------------------------------------------------
 
@@ -200,7 +204,7 @@ dev.off()
 
 # * Inter-spp niche overlap -----------------------------------------------
 
-pairH <- read.csv('Data/foram_species_pairs_KDE_H_200129.csv', stringsAsFactors=FALSE)
+pairH <- read.csv('Data/foram_species_pairs_KDE_H_200213.csv', stringsAsFactors=FALSE)
 # Watch out - not normally distributed because of bounds at 0 and 1.
 
 pairH$bin <- factor(pairH$bin, levels = bins)
@@ -402,13 +406,13 @@ ecoLabs <- c('Mixed layer, symb',
 
 empt <- ggplot(data=plotDf, aes(y=y)) +
   theme_bw() +
-  scale_y_continuous(limits=c(0,0.4), expand=c(0,0)) +
+  scale_y_continuous(limits=c(0,0.3), expand=c(0,0)) +
   theme(axis.title.x = element_blank())
 
-# add n-labels aligned at left of plot area
+# add n-labels aligned at right of plot area
 lablr <- function(v){
   lab <- paste('n =', length(v))
-  data.frame(y=0.05, label=lab)
+  data.frame(y=0.025, label=lab)
 }
 
 p1 <- 
@@ -455,7 +459,6 @@ grid.arrange(arrangeGrob(smallMult), bottom='Mean Hellinger\'s H among species')
 dev.off()
 
 # Sampled vs. species optima ----------------------------------------------
-kdeSim <- read.csv("Data/uniform_niche_sim_sumry_metrics_200129.csv", stringsAsFactors=FALSE)
 
 nReal <- length(realSpp)
 
@@ -468,25 +471,20 @@ optCor <- function(s, var, dat){
   cor(gDat, sDat[,mCol], method='spear')
 }
 
-for (metric in c('m','pe')){
-corsReal <- sapply(realSpp, optCor, dat=nich, var=metric)
-corsSim <- sapply(realSpp, optCor, dat=kdeSim, var=metric)
-
-trt <- c(rep('real species',nReal), rep('simulated neutral niche',nReal))
-cors <- data.frame(cor=c(corsReal, corsSim), treatment=trt)
+corsM <- sapply(realSpp, optCor, dat=df, var='m')
+corsPe <- sapply(realSpp, optCor, dat=df, var='pe')
+trt <- c(rep('mean',length(realSpp)), rep('pref env', length(realSpp)))
+cors <- data.frame(cor=c(corsM, corsPe), metric=trt)
 yNm <- paste('rho corr., sp',metric,' vs. global MAT')
 boxes <- 
-  ggplot(data=cors, aes(x=trt, y=cor)) +
-  geom_boxplot() +
+  ggplot(data=cors) +
+  geom_boxplot(aes(x=trt, y=cor)) +
   scale_y_continuous(name=yNm, limits=c(-1,1), expand=c(0,0)) + # c(-0.7,0.7)
   theme(axis.title.x=element_blank())
 boxesNm <- paste0('Figs/global_MAT_corr_w_sp_', metric, '_', vShrt, day, '.pdf')
 pdf(boxesNm, width=4, height=4)
 print(boxes)
 dev.off()
-
-#t.test(corsReal, corsSim, paired = TRUE)
-}
 
 # Time series -------------------------------------------------------------
 
@@ -552,6 +550,5 @@ pdf(tsNm, width=8, height=9)
 tsPlot
 dev.off()
 
-} # end loop through environmental variables to plot
-
+# } # end loop through environmental variables to plot
   
