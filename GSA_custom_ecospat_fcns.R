@@ -4,7 +4,6 @@ kdeNiche <-
   function (sp, xmax, xmin, R, h.method="nrd0") {
     sp <- as.matrix(sp)
     l <- list()
-    x <- seq(from = xmin, to = xmax, length.out = R)
     # Arguments 'from', 'to', 'R', and 'cut' don't affect bandwidth for nrd0, SJ-ste, or ucv
     # but they do affect the roughness of the density plot - smoother (better) with defaults
     # for SJ-ste and ucv especially. Customised density behaviour is ok for nrd0.
@@ -30,7 +29,7 @@ kdeNiche <-
     # peak abundance, preferred environment, & tolerance
     l$pa <- max(z$y)
     pe.pos <- which.max(z$y)
-    l$pe <- x[pe.pos]
+    l$pe <- z$x[pe.pos]
     l$t <- sd(sp)
     
     # To approximate the KDE as a function, one also needs x-values:
@@ -50,32 +49,4 @@ hell <- function (z1, z2) {
   int <- integral(intgrnd, a, b)
   h <- sqrt(1 - int)
   h
-}
-
-sumErr <- function(z1, z2){
-  xmin <- min(z1$x)
-  xmax <- max(z1$x)
-  
-  # base integrate function, suppressed errors
-  fun1lin <- approxfun(z1$x, z1$z)
-  fun2lin <- approxfun(z2$x, z2$z)
-  errBaseLin <- 2 - (integrate(fun1lin, xmin, xmax, stop.on.error = FALSE)$value +
-                       integrate(fun2lin, xmin, xmax, stop.on.error = FALSE)$value)
-  
-  # base integrate function, from integrand approximated with spline
-  fun1spl <- splinefun(z1$x, z1$z)
-  fun2spl <- splinefun(z2$x, z2$z)
-  errBaseSpl <- 2 - (integrate(fun1spl, xmin, xmax)$value +
-                       integrate(fun2spl, xmin, xmax)$value)
-  
-  # adaptive Simpson approximation will be used since interval is finite.
-  errSimpLin <- 2 - (integral(fun1lin, xmin, xmax) +
-                       integral(fun2lin, xmin, xmax))
-  errSimpSpl <- 2 - (integral(fun1spl, xmin, xmax) +
-                       integral(fun2spl, xmin, xmax))
-  
-  # trapezoidal integral approximation 
-  errTrapLin <- 2 - (trapz(z1$x, z1$z) + trapz(z2$x, z2$z))
-  
-  cbind(errBaseLin, errBaseSpl, errSimpLin, errSimpSpl, errTrapLin)
 }
