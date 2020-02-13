@@ -311,8 +311,13 @@ write.csv(outDf, outNm, row.names = FALSE)
 source('GSA_custom_ecospat_fcns.R')
 
 # if not running any sections above, load the data:
-outDf <- read.csv("Data/foram_MAT_occs_latlong_8ka_trunc_200213.csv",
-                  stringsAsFactors = FALSE)
+if (doTrunc){
+  outDf <- read.csv("Data/foram_MAT_occs_latlong_8ka_trunc_200213.csv",
+                    stringsAsFactors = FALSE)
+} else {
+  outDf <- read.csv("Data/foram_MAT_occs_latlong_8ka_200213.csv",
+                    stringsAsFactors = FALSE)
+}
 spp <- unique(outDf$species)
 bins <- unique(outDf$bin)
 nbins <- length(bins)
@@ -513,5 +518,9 @@ stopImplicitCluster()
 
 interWide <- spread(interLong, envVar, h)
 colnames(interWide)[3+1:length(envCol)] <- paste0('h_', envCol)
-interSppNm <- paste0('Data/foram_species_pairs_KDE_H_', day, '.csv')
+if (doTrunc){
+  interSppNm <- paste0('Data/foram_species_pairs_KDE_H_trunc_', day, '.csv')
+} else {
+  interSppNm <- paste0('Data/foram_species_pairs_KDE_H_', day, '.csv')
+}
 write.csv(interWide, interSppNm, row.names=FALSE)
