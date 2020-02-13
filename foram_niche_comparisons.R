@@ -14,8 +14,8 @@ day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
 envVars <- c('temp_ym_hab','temp_ym_0m')
 
-#df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200127.csv", stringsAsFactors=FALSE)
-df <- read.csv("Data/foram_niche_sumry_metrics_200129.csv", stringsAsFactors=FALSE)
+df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200213.csv", stringsAsFactors=FALSE)
+# df <- read.csv("Data/foram_niche_sumry_metrics_200129.csv", stringsAsFactors=FALSE)
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
 
@@ -65,49 +65,6 @@ for (s in epithets){
 }
 keepBool <- splitSpp$sp %in% longSpp
 nich <- splitSpp[keepBool,]
-
-# Sampled vs global MAT corr ----------------------------------------------
-
-# calculate mean absolute latitude at sampling points
-#allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200116.csv')
-allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv')
-allSampBool <- allPts$species=='sampled'
-allSamp <- allPts[allSampBool,]
-absLat <- sapply(bins, function(b){
-  slcBool <- allSamp$bin==b
-  slc <- allSamp[slcBool,]
-  abslat <- abs(slc$centroid_lat)
-  mean(abslat)
-})
-
-# calculate mean MAT over globe, at set grid of points
-glob <- read.csv('Data/global_surface_MAT_at_grid_pts_4ka.csv')
-cols <- paste0('X',bins)
-globMean <- colMeans(glob[,cols])
-
-# combine with sampling n and mean MAT
-sampBool <- nich$sp=='sampled1'
-samp <- nich[sampBool,]
-sampMean <- samp$m_temp_ym_0m
-logSampN <- log(samp$n)
-
-# no autocorrelation in residuals of main relationship of interest
-l <- lm(sampMean~globMean)
-r <- resid(l)
-acf(r)
-
-corVars <- cbind(logSampN, absLat, sampMean, globMean)
-
-# There are WAY more sampling points in the last 2 time steps -
-# these are very influential points, so exclude from cor tests.
-# But could also include these points - they aren't really outliers.
-excl <- nrow(corVars) - 0:1
-corVars <- corVars[-excl,]
-
-corNm <- paste0('Figs/correlations_sampled_vs_global_',day,'.pdf')
-pdf(corNm, width=5, height=5)
-chart.Correlation(corVars, histogram=TRUE, pch=19, method='pearson')
-dev.off()
 
 # Evo models --------------------------------------------------------------
 # TODO: use sampled environment from same depth as species
