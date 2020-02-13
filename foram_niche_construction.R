@@ -313,11 +313,11 @@ source('GSA_custom_ecospat_fcns.R')
 # if not running any sections above, load the data:
 outDf <- read.csv("Data/foram_MAT_occs_latlong_8ka_trunc_200213.csv",
                   stringsAsFactors = FALSE)
-allSpp <- unique(outDf$species)
-keepSpp <- setdiff(allSpp, 'sampled')
+spp <- unique(outDf$species)
 bins <- unique(outDf$bin)
 nbins <- length(bins)
 envCol <- c("temp_ym_hab","temp_ym_0m")
+ncores <- detectCores() - 1
 
 # * KDE niche summary -----------------------------------------------------
 
@@ -403,7 +403,7 @@ kdeLoop <- function(e,dat){
     w1 <- approxfun(densSamp1$x, densSamp1$y)
     w2 <- approxfun(densSamp2$x, densSamp2$y)
     
-    sList <- lapply(keepSpp, function(s){
+    sList <- lapply(spp, function(s){
       nicher(dat = dat, b1 = x[1], b2 = x[2], s = s, env = e, 
              w1 = w1, w2 = w2, xmn = xmn, xmx = xmx)
     })
@@ -451,8 +451,9 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
   return(rtrn)
 }
 
-rawSumL <- lapply(keepSpp, function(s){
-  temp <- lapply(bins[-1], sumup, s=s, dat=outDf, binCol='bin', sCol='species', traitCol=envCol)
+rawSumL <- lapply(spp, function(s){
+  temp <- lapply(bins[-1], sumup, s=s, dat=outDf, 
+                 binCol='bin', sCol='species', traitCol=envCol)
   tempDf <- do.call(rbind, temp)
 })
 rawSum <- do.call(rbind, rawSumL)
