@@ -7,87 +7,12 @@ library(cowplot)
 library(grid)
 library(gridExtra)
 
+# Source functions for:
+# length-bias corrected kernels
+# Hellinger's H
+# Holland's niche summarisation
 # revised version of GoFKernel boundary reflection function
-source('GSA_GoFKernel_reflection_fcn.R')
-
-# TODO
-# Figure out why the lower and upper bound of transformed x (from inverse) is too high at big n
-# Add tweak to uniroot function within inverse, for badly behaved empirical data
-transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
-  n <- length(x)
-  muHat <- n * sum( w(x)^-1 )^-1
-  
-  test <- c(is.infinite(w(0)), is.na(w(0)))
-  if (any(test)){
-    lwr <- exp(-30)
-  } else {
-    lwr <- 0
-  }
-  Y <- sapply(x, function(u){
-    integral(w, xmin = lwr, xmax = u) 
-  })
-  
-  # kernel density estimation on transformed data
-  # note that the authors used local quadratic likelihood instead
-  kde <- density(Y, kernel='gaussian', bw=hMeth, cut=0, n=nbreak)
-  
-  # scale to integrate to one
-  kde$y <- muHat * kde$y
-  
-  # Back-transform from the y=W(x) argument to x.
-  # Build custom cdf function, since 
-  # inverse() does not play well with ecdf (step fcn)
-  upr <- max(kde$x)
-  cdf <- function(f, lower) {
-    function(z) integral(f, lower, z)
-  }
-  wcdf <- cdf(f = w, lower = lwr)
-  inv <- inverse(wcdf, lower = lwr, upper = upr)
-  
-  kde$xTrans <- kde$x
-  kde$x <- sapply(kde$x, inv)
-  
-  # if w(x) is undefined at 0, then min and max of X can off
-  # (albeit only slightly) from values at which kernel can estimate 
-  f <- approxfun(kde$x, kde$y)
-  a <- min(kde$x)
-  b <- max(kde$x)
-  
-  append(list(f=f, lower=a, upper=b), kde)
-}
-
-# weighted kernel density estimation after Jones 1991
-# TODO
-# Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
-JonesEst <- function(x, w, reflect=FALSE, ...){
-  wts <- 1/w(x)
-  wts <- wts/sum(wts)
-  
-  args <- list(...)
-  if ('from' %in% names(args)){
-    from <- args$from
-  } else {
-    from <- min(x)
-  }
-  if ('to' %in% names(args)){
-    to <- args$to
-  } else {
-    to <- max(x)
-  }
-  
-  if (reflect){
-    kde <- density.reflected(x, lower = from, upper = to,
-                             weights = wts, ...)
-  } else {
-    kde <- density(x, from = from, to = to, 
-                   weights = wts, ...)
-  }
-  
-  f <- approxfun(kde$x, kde$y)
-  a <- min(kde$x)
-  b <- max(kde$x)
-  append(list(f=f, lower=a, upper=b), kde)
-}
+source('GSA_custom_ecospat_fcns.R')
 
 # Simulate for simple bias ------------------------------------------------
 
