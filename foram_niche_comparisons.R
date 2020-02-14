@@ -9,7 +9,7 @@ library(cowplot)
 library(grid)
 library(gridExtra)
 
-doTrunc <- FALSE
+doTrunc <- TRUE
 
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
@@ -460,7 +460,7 @@ optCor <- function(s, var, dat){
 corsM <- sapply(realSpp, optCor, dat=df, var='m')
 corsPe <- sapply(realSpp, optCor, dat=df, var='pe')
 trt <- c(rep('mean',length(realSpp)), rep('pref env', length(realSpp)))
-cors <- data.frame(cor=c(corsM, corsPe), metric=trt)
+cors <- data.frame(sp=realSpp, cor=c(corsM, corsPe), metric=trt)
 boxes <- 
   ggplot(data=cors) +
   geom_hline(yintercept=0, linetype='dotted') +
@@ -479,6 +479,47 @@ print(boxes)
 dev.off()
 
 t.test(corsM, corsPe, paired = TRUE)
+
+# * Correlation strength vs n ---------------------------------------------
+
+# At lower n, KDE correction for bias has higher MISE, so induced correlation
+# with global temperatures could be higher.
+sumN <- function(s){
+  sBool <- df$sp==s
+  nseq <- df$n[sBool]
+  c(avg=mean(nseq), med=median(nseq))
+}
+spN <- sapply(realSpp, sumN)
+
+peBool <- cors$metric=='pref env'
+peCors <- cors[peBool,]
+peCors$avgN <- spN['avg',]
+peCors$medN <- spN['med',]
+
+medPlot <- 
+  ggplot(data=peCors) +
+  theme_bw() +
+  scale_x_continuous('median N') +
+  scale_y_continuous('correlation with global MAT') +
+  geom_hline(yintercept=0, linetype='dotted') +
+  geom_point(aes(x=medN, y=cor)) 
+avgPlot <- 
+  ggplot(data=peCors) +
+  theme_bw() +
+  scale_x_continuous('mean N') +
+  geom_hline(yintercept=0, linetype='dotted') +
+  geom_point(aes(x=avgN, y=cor)) +
+  theme(axis.text.y=element_blank(),
+        axis.title.y=element_blank())
+  
+if (doTrunc){
+  pairNm <- paste0('Figs/corr_w_global_vs_sample_size_trunc_', vShrt, day, '.pdf')
+} else {
+  pairNm <- paste0('Figs/corr_w_global_vs_sample_size_', vShrt, day, '.pdf')
+}
+pdf(pairNm, width=6, height=4)
+plot_grid(medPlot, avgPlot, nrow=1, rel_widths = c(1, 0.85))
+dev.off()
 
 # Time series -------------------------------------------------------------
 
