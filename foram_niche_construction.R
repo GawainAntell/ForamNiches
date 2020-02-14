@@ -367,17 +367,16 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
   
   # the species may be absent in one or both bins, in which case z is an empty list
   if (length(d1)==0){
-    data.frame(bin=NA, sp=NA, n=NA, h=NA, pa=NA, pe=NA)
+    data.frame(bin=NA, sp=NA, h=NA, pa=NA, pe=NA)
     
   } else {
-    n <- length(sp1rows)
     stats <- nichStats(d1)
     
     if (length(d2)==0){
-      data.frame(bin=b1, sp=s, n=n, h=NA, t(stats))
+      data.frame(bin=b1, sp=s, h=NA, t(stats))
     } else{
       h <- hell(d1, d2) 
-      data.frame(bin=b1, sp=s, n=n, h=h, t(stats))
+      data.frame(bin=b1, sp=s, h=h, t(stats))
     }
   }
 }
@@ -387,9 +386,8 @@ bPairs <- cbind(bins[-1], bins[-length(bins)])
 # for the most recent time bin, it's not possible to calculate overlap
 # (because no modern data are included), but include it anyway
 # so that the standing niche at the last time bin is calculated
-  #recent <- cbind(4, NA)
-  #bPairs <- rbind(recent, bPairs)
-# TODO: actually the modern is a problem because there's no weight for b2
+recent <- cbind(4, NA)
+bPairs <- rbind(recent, bPairs)
 
 # loop over time bins over species over environmental variables
 kdeLoop <- function(e,dat){
@@ -404,9 +402,15 @@ kdeLoop <- function(e,dat){
     samp1 <- dat[sampRows1,e]
     samp2 <- dat[sampRows2,e]
     densSamp1 <- density.reflected(samp1, from=xmn, to=xmx) 
-    densSamp2 <- density.reflected(samp2, from=xmn, to=xmx) 
     w1 <- approxfun(densSamp1$x, densSamp1$y)
-    w2 <- approxfun(densSamp2$x, densSamp2$y)
+    
+    # in the most recent time bin, there is no subsequent bin
+    if (length(samp2)!=0){
+      densSamp2 <- density.reflected(samp2, from=xmn, to=xmx) 
+      w2 <- approxfun(densSamp2$x, densSamp2$y)
+    } else {
+      w2 <- NA
+    } 
     
     sList <- lapply(spp, function(s){
       nicher(dat = dat, b1 = x[1], b2 = x[2], s = s, env = e, 
@@ -425,7 +429,7 @@ eList <- lapply(envCol, kdeLoop, dat=outDf)
 # but then use in-habitat temp for niches. Temps at depth can get colder
 # than the standardised lower bound from surface data.
 # Perhaps an alternative to surface and in-habitat temp is to use MLD temp.
-nich <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
+kdeSum <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
               suffixes=paste0('_', envCol))
 
 # * Non-KDE niche summary -------------------------------------------------
@@ -457,14 +461,14 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
 }
 
 rawSumL <- lapply(spp, function(s){
-  temp <- lapply(bins[-1], sumup, s=s, dat=outDf, 
+  temp <- lapply(bins, sumup, s=s, dat=outDf, 
                  binCol='bin', sCol='species', traitCol=envCol)
   tempDf <- do.call(rbind, temp)
 })
 rawSum <- do.call(rbind, rawSumL)
 
 # combine KDE and raw-scale summary/sample statistics into one output file
-fullSum <- merge(nich, rawSum)
+fullSum <- merge(kdeSum, rawSum)
 if (doTrunc){
   sumNm <- paste0('Data/foram_niche_sumry_metrics_trunc_',day,'.csv') 
 } else {
