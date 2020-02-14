@@ -9,16 +9,25 @@ library(cowplot)
 library(grid)
 library(gridExtra)
 
+doTrunc <- TRUE
+
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-envVars <- c('temp_ym_hab','temp_ym_0m')
+#envVars <- c('temp_ym_hab','temp_ym_0m')
 
-df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200213.csv", stringsAsFactors=FALSE)
-# df <- read.csv("Data/foram_niche_sumry_metrics_200129.csv", stringsAsFactors=FALSE)
+if (doTrunc){
+  df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200214.csv", stringsAsFactors=FALSE)
+  v <- 'temp_ym_0m'
+  # See note on niche construction script: if truncating temp by surface values,
+  # it doesn't make sense to use in-habitat temperature downstream.
+} else {
+  df <- read.csv("Data/foram_niche_sumry_metrics_200214.csv", stringsAsFactors=FALSE)
+  v <- 'temp_ym_hab'
+}
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
-
+vShrt <- paste(strsplit(v,'_')[[1]], collapse='')
 bins <- unique(df$bin)
 spp <- unique(df$sp)
 binL <- bins[1] - bins[2]
@@ -67,7 +76,12 @@ keepBool <- splitSpp$sp %in% longSpp
 nich <- splitSpp[keepBool,]
 
 # Evo models --------------------------------------------------------------
-# TODO: use sampled environment from same depth as species
+# TODO: use sampled environment from same depth as species, tsSamp object
+
+# alternatively, load saved versions and skip running this section
+# (if running 9 models, this is slow, so it's worthwhile to save and load)
+# mods4 <- readRDS("Data/Data/4_evo_model_fits_trunc_tempym0m200214.rds")
+# mods4 <- readRDS("Data/Data/4_evo_model_fits_tempymhab200214.rds")
 
 evoFit <- function(s, sampStats, nmods='four'){
   mNm <- sampStats[1]
@@ -93,12 +107,13 @@ evoFit <- function(s, sampStats, nmods='four'){
                        nn = samp$n, tt = samp$scaledT, 
                        oldest = 'first', reset.time = FALSE)
   
+  # some sample variances are not equal, so use pool=FALSE for all sequences
   if (l < 14 | nmods=='four'){
-    modsSp <- fit4models(ts, method='Joint', silent=TRUE)
-    modsSamp <- fit4models(tsSamp, method='Joint', silent=TRUE)
+    modsSp <- fit4models(ts, method='AD', silent=TRUE, pool=FALSE) 
+    modsSamp <- fit4models(tsSamp, method='AD', silent=TRUE, pool=FALSE) 
   } else {
-    modsSp <- fit9models(ts, method='Joint', silent=TRUE)
-    modsSamp <- fit9models(tsSamp, method='Joint', silent=TRUE)
+    modsSp <- fit9models(ts, method='AD', silent=TRUE, pool=FALSE)
+    modsSamp <- fit9models(tsSamp, method='AD', silent=TRUE, pool=FALSE)
   }
   # From the package documentation:
   # 'Method = "Joint" is a full likelihood approach, considering each time-series as a joint sample
@@ -109,8 +124,12 @@ evoFit <- function(s, sampStats, nmods='four'){
   # 'joint parameterization  is  better  able  to  correctly  identify  directional  trends. 
   # This advantage increases with sequence length, and is most pronounced when sampling error is high'
   
+  # HOWEVER, although joint might be better for most series, for Pulleniatina obliquiloculata3 
+  # a fatal error occurs (matrix not full rank?) unless pool and hess arguments are modified
+  # Error in optim(p0, fn = logL.joint.URW, control = cl, method = meth, lower = c(NA,  : 
+  # non-finite value supplied by optim
+  
   wts <- modsSp$modelFits$Akaike.wt
-#  modsSp$modelFits[order(wts),]
   maxMod <- which.max(wts)
   modNm <- row.names(modsSp$modelFits)[maxMod]
   w <- max(wts)
@@ -125,46 +144,20 @@ evoFit <- function(s, sampStats, nmods='four'){
   out
 }
 
-statsNmL <- lapply(envVars, function(txt) paste(c('m','sd'), txt, sep='_'))
+statsNm <- paste(c('m','sd'), v, sep='_')
 
-# alternatively, load saved versions and skip running the section in parallel below
-# mods <- readRDS("Data/9_evo_model_fits_200129.rds")
-# mods4 <- readRDS("Data/4_evo_model_fits_200131.rds")
+mods4l <- lapply(longSpp, evoFit, sampStats = statsNm, nmods = 'four') # 'nine'
+mods4 <- do.call('rbind', mods4l)
 
-pt1 <- proc.time()
-ncores <- detectCores() - 1
-registerDoParallel(ncores)
-  mods <- foreach(i=1:length(envVars), .packages='paleoTS', .combine=rbind, .inorder=FALSE) %:%
-    foreach(s=longSpp, .packages='paleoTS', .combine=rbind, .inorder=FALSE) %dopar% {
-      statsNm <- statsNmL[[i]]
-    evoFit(s, sampStats = statsNm, nmods = 'nine') 
-    } # 8 min runtime
-  mods4 <- foreach(i=1:length(envVars), .packages='paleoTS', .combine=rbind, .inorder=FALSE) %:%
-    foreach(s=longSpp, .packages='paleoTS', .combine=rbind, .inorder=FALSE) %dopar% {
-      statsNm <- statsNmL[[i]]
-      evoFit(s, sampStats = statsNm, nmods = 'four') 
-    } # only a few seconds runtime
-stopImplicitCluster()
-pt2 <- proc.time()
-pt2-pt1
+if (doTrunc){
+  mods4nm <- paste0('Data/4_evo_model_fits_trunc_',vShrt, day, '.rds')
+} else {
+  mods4nm <- paste0('Data/4_evo_model_fits_',vShrt, day, '.rds')
+}
+# saveRDS(mods4, mods4nm)
 
-mods9nm <- paste0('Data/9_evo_model_fits_', day, '.rds')
-mods4nm <- paste0('Data/4_evo_model_fits_', day, '.rds')
-# saveRDS(mods, mods9nm); saveRDS(mods4, mods4nm)
+table(mods4$bestMod)
 
-table(mods$bestMod)
-
-# PLOTS -------------------------------------------------------------------
-
-# build a giant loop (across multiple sections of code)
-# to export every plot for each env variable in turn
-# for (v in envVars){
-v <- 'temp_ym_0m'
-# See note on niche construction script: if truncating temp by surface values,
-# it doesn't make sense to use in-habitat temperature downstream.
-
-vShrt <- paste(strsplit(v,'_')[[1]], collapse='')
-  
 # Spp vs sampling evo mode ------------------------------------------------
 
 vRows <- grep(v, mods$var)
@@ -549,6 +542,3 @@ tsNm <- paste0('Figs/time_series_species_mean.se_', vShrt, day, '.pdf')
 pdf(tsNm, width=8, height=9)
 tsPlot
 dev.off()
-
-# } # end loop through environmental variables to plot
-  
