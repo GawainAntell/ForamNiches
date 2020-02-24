@@ -92,9 +92,7 @@ density.reflected <- function (x, lower = -Inf, upper = Inf, weights = NULL, ...
 }
 
 # transformation-based density estimation after Barmi & Simonoff 2000
-# TODO
-# Figure out why the lower and upper bound of transformed x (from inverse) is too high at big n
-# Add tweak to uniroot function within inverse, for badly behaved empirical data
+# TODO Add tweak to uniroot function within inverse, for badly behaved empirical data
 transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   n <- length(x)
   muHat <- n * sum( w(x)^-1 )^-1
@@ -105,31 +103,26 @@ transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
   } else {
     lwr <- 0
   }
-  Y <- sapply(x, function(u){
-    integral(w, xmin = lwr, xmax = u) 
-  })
   
-  # kernel density estimation on transformed data
-  # note that the authors used local quadratic likelihood instead
+  # transform data to estimate kernel density
+  cdf <- function(z){
+    integral(w, lwr, z)
+  } 
+  Y <- sapply(x, cdf)
   kde <- density(Y, kernel='gaussian', bw=hMeth, cut=0, n=nbreak)
   
   # scale to integrate to one
   kde$y <- muHat * kde$y
   
   # Back-transform from the y=W(x) argument to x.
-  # Build custom cdf function, since 
   # inverse() does not play well with ecdf (step fcn)
-  upr <- max(kde$x)
-  cdf <- function(f, lower) {
-    function(z) integral(f, lower, z)
-  }
-  wcdf <- cdf(f = w, lower = lwr)
-  inv <- inverse(wcdf, lower = lwr, upper = upr)
+  upr <- max(x)
+  inv <- inverse(cdf, lower = lwr, upper = upr)
   
   kde$xTrans <- kde$x
   kde$x <- sapply(kde$x, inv)
   
-  # if w(x) is undefined at 0, then min and max of X can off
+  # if w(x) is undefined at 0, then min and max of X can be off
   # (albeit only slightly) from values at which kernel can estimate 
   f <- approxfun(kde$x, kde$y)
   a <- min(kde$x)
