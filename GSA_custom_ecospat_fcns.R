@@ -93,7 +93,7 @@ density.reflected <- function (x, lower = -Inf, upper = Inf, weights = NULL, ...
 
 # transformation-based density estimation after Barmi & Simonoff 2000
 # TODO Add tweak to uniroot function within inverse, for badly behaved empirical data
-transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
+transformEst <- function(x, w, reflect = FALSE, ...){
   n <- length(x)
   muHat <- n * sum( w(x)^-1 )^-1
   
@@ -104,12 +104,29 @@ transformEst <- function(x, w, hMeth='nrd0', nbreak=2^8){
     lwr <- 0
   }
   
-  # transform data to estimate kernel density
+  # transform data
   cdf <- function(z){
     integral(w, lwr, z)
   } 
   Y <- sapply(x, cdf)
-  kde <- density(Y, kernel='gaussian', bw=hMeth, cut=0, n=nbreak)
+  
+  # estimate kernel density, with boundary reflection if specified
+  args <- list(...)
+  if ('from' %in% names(args)){
+    from <- args$from
+  } else { 
+    from <- min(Y)
+  }
+  if ('to' %in% names(args)){
+    to <- args$to
+  } else {
+    to <- max(Y)
+  }
+  if (reflect){
+    kde <- density.reflected(Y, lower = from, upper = to, ...)
+  } else {
+    kde <- density(Y, from = from, to = to, ...)
+  }
   
   # scale to integrate to one
   kde$y <- muHat * kde$y
