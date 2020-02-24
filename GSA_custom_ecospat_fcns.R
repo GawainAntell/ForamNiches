@@ -92,49 +92,50 @@ density.reflected <- function (x, lower = -Inf, upper = Inf, weights = NULL, ...
 }
 
 # transformation-based density estimation after Barmi & Simonoff 2000
+# NB: if 'a' and 'b' argumentss given, these should be on the untransformed x scale,
+# and one should NOT provide the arguments to/from or lower/upper.
 # TODO Add tweak to uniroot function within inverse, for badly behaved empirical data
-transformEst <- function(x, w, reflect = FALSE, ...){
-  n <- length(x)
-  muHat <- n * sum( w(x)^-1 )^-1
+transformEst <- function(x, w, reflect = FALSE, a=NULL, b=NULL, ...){
+  argmts <- list(...)
   
-  test <- c(is.infinite(w(0)), is.na(w(0)))
-  if (any(test)){
-    lwr <- exp(-30)
-  } else {
-    lwr <- 0
+  if (is.null(a)){
+    test <- c(is.infinite(w(0)), is.na(w(0)))
+    if (any(test)){
+      a <- min(x)
+    } else {
+      a <- 0
+    }
   }
   
-  # transform data
+  # transform the observations
   cdf <- function(z){
-    integral(w, lwr, z)
+    integral(w, a, z)
   } 
   Y <- sapply(x, cdf)
   
+  # define the boundaries of estimation on the transformed scale
+  aYscale <- cdf(a)
+  if (is.null(b)){
+    b <- max(x)
+    bYscale <- max(Y)
+  } else {
+    bYscale <- cdf(b)
+  }
+  
   # estimate kernel density, with boundary reflection if specified
-  args <- list(...)
-  if ('from' %in% names(args)){
-    from <- args$from
-  } else { 
-    from <- min(Y)
-  }
-  if ('to' %in% names(args)){
-    to <- args$to
-  } else {
-    to <- max(Y)
-  }
   if (reflect){
-    kde <- density.reflected(Y, lower = from, upper = to, ...)
+    kde <- density.reflected(Y, lower = aYscale, upper = bYscale, ...)
   } else {
-    kde <- density(Y, from = from, to = to, ...)
+    kde <- density(Y, from = aYscale, to = bYscale, ...)
   }
   
   # scale to integrate to one
+  n <- length(x)
+  muHat <- n * sum( w(x)^-1 )^-1
   kde$y <- muHat * kde$y
   
   # Back-transform from the y=W(x) argument to x.
-  # inverse() does not play well with ecdf (step fcn)
-  upr <- max(x)
-  inv <- inverse(cdf, lower = lwr, upper = upr)
+  inv <- inverse(cdf, lower = a, upper = b)
   
   kde$xTrans <- kde$x
   kde$x <- sapply(kde$x, inv)
@@ -142,10 +143,10 @@ transformEst <- function(x, w, reflect = FALSE, ...){
   # if w(x) is undefined at 0, then min and max of X can be off
   # (albeit only slightly) from values at which kernel can estimate 
   f <- approxfun(kde$x, kde$y)
-  a <- min(kde$x)
-  b <- max(kde$x)
+  lwr <- min(kde$x)
+  upr <- max(kde$x)
   
-  append(list(f=f, lower=a, upper=b), kde)
+  append(list(f=f, lower=lwr, upper=upr), kde)
 }
 
 # weighted kernel density estimation after Jones 1991
@@ -155,14 +156,14 @@ JonesEst <- function(x, w, reflect=FALSE, ...){
   wts <- 1/w(x)
   wts <- wts/sum(wts)
   
-  args <- list(...)
-  if ('from' %in% names(args)){
-    from <- args$from
+  argmts <- list(...)
+  if ('from' %in% names(argmts)){
+    from <- argmts$from
   } else {
     from <- min(x)
   }
-  if ('to' %in% names(args)){
-    to <- args$to
+  if ('to' %in% names(argmts)){
+    to <- argmts$to
   } else {
     to <- max(x)
   }
