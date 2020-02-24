@@ -115,7 +115,7 @@ mseT <- function(x) (te$f(x) - dchisq(x, df=5))^2
 miseT <- integral(mseT, te$lower, te$upper)
 
 # without accounting for bias:
-kde <- density(x, kernel='gaussian', bw='nrd0', cut=0, n=2^8)
+kde <- density(x, kernel='gaussian', bw='nrd0', cut=0)
 f <- approxfun(kde$x, kde$y)
 mseBad <- function(x) (f(x) - dchisq(x, df=5))^2
 miseBad <- integral(mseBad, min(kde$x), max(kde$x))
@@ -235,67 +235,77 @@ dev.off()
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 
-occ <- read.csv('Data/foram_MAT_occs_latlong_8ka_200129.csv', stringsAsFactors=FALSE)
+occ <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200213.csv', stringsAsFactors=FALSE)
 focalB <- seq(100, 700, by=200)
 env <- 'temp_ym_0m'
 spp <- unique(occ$species)
 xmax <- max(occ[,env])
 xmin <- min(occ[,env])
 
-#source('GSA_custom_ecospat_fcns.R')
-
 for (b in focalB){
-  # estimate bias function (w) from sampling distribution, with boundary reflection
-  sampRows <- which(occ$bin==b & occ$species=='sampled')
-  samp <- occ[sampRows,env]
-  densW <- density.reflected(samp, # kernel='gaussian', bw='nrd0', 
-                             from=xmin, to=xmax, n = 2^9
-  ) 
-  w <- approxfun(densW$x, densW$y)
-  
-  plotL <- list()
-  for (s in spp){
-    # construct KDE for the sp, with boundary reflection and Jones' correction
-    spRows <- which(occ$bin==b & occ$species==s)
-    sp <- occ[spRows,env]
+  for (meth in c('weight','transform')){
     
-    kdeSp <- tryCatch(
-      JonesEst(sp, w, reflect = TRUE, from = xmin, to = xmax),
-      error = function(err){ list() }
+    # estimate bias function (w) from sampling distribution, with boundary reflection
+    sampRows <- which(occ$bin==b & occ$species=='sampled')
+    samp <- occ[sampRows,env]
+    densW <- density.reflected(samp, # kernel='gaussian', bw='nrd0', 
+                               from=xmin, to=xmax, n = 2^9
     ) 
-    if (length(kdeSp)==0){ next }
-    pePos <- which.max(kdeSp$y)
-    kdeSp$pe <- kdeSp$x[pePos]
+    w <- approxfun(densW$x, densW$y)
     
-    # save a plot of the KDE
-    plotDat <- data.frame(x=kdeSp$x, kd=kdeSp$y)
-    nlab <- paste0('n=', length(sp))
-    numNa <- nrow(plotDat) - length(sp)
-    plotDat$rugHack <- c(sp, rep(NA, numNa))
-    sPlot <- 
-      ggplot(data=plotDat, aes(x=x, y=kd)) +
-      theme_bw() +
-      ggtitle(s) +
-      geom_area(fill='khaki1') +
-      geom_line() +
-      geom_segment(x=kdeSp$pe, xend=kdeSp$pe, y=0, yend=1, colour='red') +
-      geom_segment(x=mean(sp), xend=mean(sp), y=0, yend=1, colour='blue') +
-      geom_hline(yintercept=0) +
-      geom_rug(aes(x=rugHack), sides='b', length=unit(0.045, "npc")) + 
-      scale_x_continuous(expand=c(0,0)) +
-      theme(axis.title.x = element_blank(),
-            axis.title.y = element_blank(),
-            plot.title = element_text(size=9))
-      sPlot <- sPlot +
-        geom_text(label=nlab, size=3, # fontface=1,
-                  x=3, y=0.9*max(plotDat$kd))
-      plotL <- append(plotL, list(sPlot))
-  } # loop through species
-  
-  # print page of plots
-  pg <- plot_grid(plotlist=plotL, nrow=6)
-  kdeNm <- paste0('Figs/KDE_all_spp_corrected_',b,'ka_',day,'.pdf')
-  pdf(kdeNm, width=8.5, height=11)
-    grid.arrange(arrangeGrob(pg))
-  dev.off()
+    plotL <- list()
+    for (s in spp){
+      # construct KDE for the sp, with boundary reflection and Jones' correction
+      spRows <- which(occ$bin==b & occ$species==s)
+      sp <- occ[spRows,env]
+      
+      if (meth=='weight'){
+        kdeSp <- tryCatch(
+          JonesEst(sp, w, reflect = TRUE, a = xmin, b = xmax),
+          error = function(err){ list() }
+        ) 
+      }
+      if (meth=='transform'){
+        kdeSp <- tryCatch(
+          transformEst(sp, w, reflect = TRUE, a = xmin, b = xmax),
+          error = function(err){ list() }
+        ) 
+      }
+      
+      if (length(kdeSp)==0){ next }
+      pePos <- which.max(kdeSp$y)
+      kdeSp$pe <- kdeSp$x[pePos]
+      
+      # save a plot of the KDE
+      plotDat <- data.frame(x=kdeSp$x, kd=kdeSp$y)
+      nlab <- paste0('n=', length(sp))
+      numNa <- nrow(plotDat) - length(sp)
+      plotDat$rugHack <- c(sp, rep(NA, numNa))
+      sPlot <- 
+        ggplot(data=plotDat, aes(x=x, y=kd)) +
+        theme_bw() +
+        ggtitle(s) +
+        geom_area(fill='cornsilk') +
+        geom_line() +
+        geom_segment(x=kdeSp$pe, xend=kdeSp$pe, y=0, yend=1, colour='red') +
+        geom_segment(x=mean(sp), xend=mean(sp), y=0, yend=1, colour='blue') +
+        geom_hline(yintercept=0) +
+        geom_rug(aes(x=rugHack), sides='b', length=unit(0.045, "npc")) + 
+        scale_x_continuous(expand=c(0,0)) +
+        theme(axis.title.x = element_blank(),
+              axis.title.y = element_blank(),
+              plot.title = element_text(size=9))
+        sPlot <- sPlot +
+          geom_text(label=nlab, size=3, # fontface=1,
+                    x=8, y=0.9*max(plotDat$kd))
+        plotL <- append(plotL, list(sPlot))
+    } # loop through species
+    
+    # print page of plots
+    pg <- plot_grid(plotlist=plotL, nrow=6)
+    kdeNm <- paste0('Figs/KDE_all_spp_',meth,'_corrected_',b,'ka_',day,'.pdf')
+    pdf(kdeNm, width=8.5, height=11)
+      grid.arrange(arrangeGrob(pg))
+    dev.off()
+  } # loop through kernel correction methods
 } # loop through bins
