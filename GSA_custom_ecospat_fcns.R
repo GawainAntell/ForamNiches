@@ -152,34 +152,27 @@ transformEst <- function(x, w, reflect = FALSE, a=NULL, b=NULL, ...){
 # weighted kernel density estimation after Jones 1991
 # TODO
 # Use Borrajo's rule of thumb and 2 bootstrap bandwidth estimators
-JonesEst <- function(x, w, reflect=FALSE, ...){
+JonesEst <- function(x, w, reflect=FALSE, a=NULL, b=NULL, ...){
   wts <- 1/w(x)
   wts <- wts/sum(wts)
   
-  argmts <- list(...)
-  if ('from' %in% names(argmts)){
-    from <- argmts$from
-  } else {
-    from <- min(x)
-  }
-  if ('to' %in% names(argmts)){
-    to <- argmts$to
-  } else {
-    to <- max(x)
+  if (is.null(a)){
+    a <- min(x)
+  } 
+  if (is.null(b)){
+    b <- max(x)
   }
   
   if (reflect){
-    kde <- density.reflected(x, lower = from, upper = to,
-                             weights = wts, ...)
+    kde <- density.reflected(x, lower = a, upper = b, weights = wts, ...)
   } else {
-    kde <- density(x, from = from, to = to, 
-                   weights = wts, ...)
+    kde <- density(x, from = a, to = b, weights = wts, ...)
   }
   
   f <- approxfun(kde$x, kde$y)
-  a <- min(kde$x)
-  b <- max(kde$x)
-  append(list(f=f, lower=a, upper=b), kde)
+  lwr <- min(kde$x)
+  upr <- max(kde$x)
+  append(list(f=f, lower=lwr, upper=upr), kde)
 }
 
 # Calculate Holland 1995 niche summary metrics:
