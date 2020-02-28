@@ -530,47 +530,6 @@ for (cutoff in c(156, 800)){
 #  t.test(corsM, corsPe, paired = TRUE)
 }
 
-# * Correlation strength vs n ---------------------------------------------
-
-# At lower n, KDE correction for bias has higher MISE, so induced correlation
-# with global temperatures could be higher.
-sumN <- function(s){
-  sBool <- df$sp==s
-  nseq <- df$n[sBool]
-  c(avg=mean(nseq), med=median(nseq))
-}
-spN <- sapply(realSpp, sumN)
-
-peBool <- cors$metric=='pref env'
-peCors <- cors[peBool,]
-peCors$avgN <- spN['avg',]
-peCors$medN <- spN['med',]
-
-medPlot <- 
-  ggplot(data=peCors) +
-  theme_bw() +
-  scale_x_continuous('median N') +
-  scale_y_continuous('correlation with global MAT') +
-  geom_hline(yintercept=0, linetype='dotted') +
-  geom_point(aes(x=medN, y=cor)) 
-avgPlot <- 
-  ggplot(data=peCors) +
-  theme_bw() +
-  scale_x_continuous('mean N') +
-  geom_hline(yintercept=0, linetype='dotted') +
-  geom_point(aes(x=avgN, y=cor)) +
-  theme(axis.text.y=element_blank(),
-        axis.title.y=element_blank())
-  
-if (doTrunc){
-  pairNm <- paste0('Figs/corr_w_global_vs_sample_size_trunc_', vShrt, day, '.pdf')
-} else {
-  pairNm <- paste0('Figs/corr_w_global_vs_sample_size_', vShrt, day, '.pdf')
-}
-pdf(pairNm, width=6, height=4)
-plot_grid(medPlot, avgPlot, nrow=1, rel_widths = c(1, 0.85))
-dev.off()
-
 # Time series -------------------------------------------------------------
 
 # Missing sp-bin combinations have already been removed from the df object.
