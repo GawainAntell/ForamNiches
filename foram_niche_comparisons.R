@@ -12,9 +12,7 @@ library(gridExtra)
 doTrunc <- TRUE
 
 # Data prep ---------------------------------------------------------------
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
-
-#envVars <- c('temp_ym_hab','temp_ym_0m')
+day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 if (doTrunc){
   df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200214.csv", stringsAsFactors=FALSE)
@@ -446,61 +444,91 @@ dev.off()
 # * Delta global MAT vs overlap -------------------------------------------
 # note that H overlap does not indicate directly, only magnitude, of niche change
 # so should compare it with absolute differences in global MAT
-
-sumH <- function(b){
-  bBool <- intraH$bin==b
-  slc <- intraH[bBool,]
-  avgH <- mean(slc[,yNm])
-  binN <- nrow(slc)
-  c(bin=b, avgH=avgH, nSpp=binN)
+for (cutoff in c(156, 800)){
+  sumH <- function(b){
+    bBool <- intraH$bin==b
+    slc <- intraH[bBool,]
+    avgH <- mean(slc[,yNm])
+    binN <- nrow(slc)
+    c(bin=b, avgH=avgH, nSpp=binN)
+  }
+  Hseq <- sapply(bins, sumH)
+  Hseq <- data.frame(t(Hseq))
+  # all values NA at most recent time step
+  Hseq <- Hseq[-nrow(Hseq),]
+  
+  delta <- diff(globMean)
+  Hseq$absDelta <- abs(delta)
+  
+  # go back in time only as far as cutoff
+  seqKeep <- Hseq$bin <= cutoff
+  Hseq <- Hseq[seqKeep,]
+  
+  ymx <- max(Hseq$avgH) * 1.1
+  xmx <- max(Hseq$absDelta) * 1.1
+  scatrCor <- cor(Hseq$absDelta, Hseq$avgH, method='spear')
+  scatrLab <- paste('rho =', round(scatrCor, 3))
+  deltaPlot <- 
+    ggplot(data=Hseq, aes(x=absDelta, y=avgH)) +
+    theme_bw() +
+    scale_x_continuous('Absolute change in global MAT (C)',
+                       limits=c(0,xmx), expand=c(0,0)) +
+    scale_y_continuous('Mean H among boundary-crossers', 
+                       limits=c(0,ymx), expand=c(0,0)) +
+    geom_point()
+  deltaPlot <- deltaPlot +
+    geom_text(aes(fontface=1), label=scatrLab,# size=3,
+              x=xmx*0.8, y=ymx*0.8)
+  if (doTrunc){
+    deltaNm <- paste0('Figs/delta-MAT-vs-mean-H_trunc_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+  } else {
+    deltaNm <- paste0('Figs/delta-MAT-vs-mean-H_',vShrt,'_',day,'.pdf')
+  }
+  pdf(deltaNm, width=6, height=4)
+  print(deltaPlot)
+  dev.off()
 }
-Hseq <- sapply(bins, sumH)
-Hseq <- data.frame(t(Hseq))
-# all values NA at most recent time step
-Hseq <- Hseq[-nrow(Hseq),]
-
-delta <- diff(globMean)
-absDelta <- abs(delta)
-
-plot(absDelta, Hseq$avgH)
-cor(absDelta, Hseq$avgH)
 
 # Global MAT vs. species optima -------------------------------------------
 
-realSpp <- setdiff(spp, 'sampled')
-nReal <- length(realSpp)
-
-optCor <- function(s, var, dat){
-  spRows <- grep(s, dat$sp)
-  sDat <- dat[spRows,]
-  bNms <- paste0('X',sDat$bin)
-  gDat <- globMean[bNms]
-  mCol <- paste(var,v,sep='_')
-  cor(gDat, sDat[,mCol], method='spear')
+for (cutoff in c(156, 800)){
+  dfKeep <- df$bin <= cutoff
+  dfCut <- df[dfKeep,]
+  realSpp <- setdiff(spp, 'sampled')
+  nReal <- length(realSpp)
+  
+  optCor <- function(s, var, dat){
+    spRows <- grep(s, dat$sp)
+    sDat <- dat[spRows,]
+    bNms <- paste0('X',sDat$bin)
+    gDat <- globMean[bNms]
+    mCol <- paste(var,v,sep='_')
+    cor(gDat, sDat[,mCol], method='spear')
+  }
+  
+  corsM <- sapply(realSpp, optCor, dat=dfCut, var='m')
+  corsPe <- sapply(realSpp, optCor, dat=dfCut, var='pe')
+  trt <- c(rep('mean',length(realSpp)), rep('pref env', length(realSpp)))
+  cors <- data.frame(sp=realSpp, cor=c(corsM, corsPe), metric=trt)
+  boxes <- 
+    ggplot(data=cors) +
+    geom_hline(yintercept=0, linetype='dotted') +
+    geom_boxplot(aes(x=trt, y=cor)) +
+    scale_y_continuous(name='rho corr., sp vs. global MAT', 
+                       limits=c(-1,1), expand=c(0,0)) + # c(-0.7,0.7)
+    theme(axis.title.x=element_blank())
+  
+  if (doTrunc){
+    boxesNm <- paste0('Figs/global-MAT-corr-w-sp_trunc_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+  } else {
+    boxesNm <- paste0('Figs/global-MAT-corr-w-sp_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+  }
+  pdf(boxesNm, width=4, height=4)
+  print(boxes)
+  dev.off()
+  
+#  t.test(corsM, corsPe, paired = TRUE)
 }
-
-corsM <- sapply(realSpp, optCor, dat=df, var='m')
-corsPe <- sapply(realSpp, optCor, dat=df, var='pe')
-trt <- c(rep('mean',length(realSpp)), rep('pref env', length(realSpp)))
-cors <- data.frame(sp=realSpp, cor=c(corsM, corsPe), metric=trt)
-boxes <- 
-  ggplot(data=cors) +
-  geom_hline(yintercept=0, linetype='dotted') +
-  geom_boxplot(aes(x=trt, y=cor)) +
-  scale_y_continuous(name='rho corr., sp vs. global MAT', 
-                     limits=c(-1,1), expand=c(0,0)) + # c(-0.7,0.7)
-  theme(axis.title.x=element_blank())
-
-if (doTrunc){
-  boxesNm <- paste0('Figs/global_MAT_corr_w_sp_trunc_', vShrt, day, '.pdf')
-} else {
-  boxesNm <- paste0('Figs/global_MAT_corr_w_sp_', vShrt, day, '.pdf')
-}
-pdf(boxesNm, width=4, height=4)
-print(boxes)
-dev.off()
-
-t.test(corsM, corsPe, paired = TRUE)
 
 # * Correlation strength vs n ---------------------------------------------
 
