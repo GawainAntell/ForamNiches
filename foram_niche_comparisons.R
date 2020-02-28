@@ -489,6 +489,176 @@ for (cutoff in c(156, 800)){
   dev.off()
 }
 
+# * G-IG overlap comparisons ----------------------------------------------
+
+# contrast the niche overlap between extreme situations:
+# glaciation peak and terminus, for 8 cycles
+# (compared to peak vs. peak and terminus vs. terminus)
+
+# find the local max and min global MAT timing in each 100ky interval
+ints <- data.frame(yng=c(seq(0,400,by=100), 480, 560, 690),
+                   old=c(seq(100,400,by=100), 480, 560, 690, 800)
+                   )
+#ints$maxAge <- ints$minAge <- NA
+for (r in 1:nrow(ints)){
+  bounds <- ints[r,]
+  inInt <- which(bins > bounds$yng & bins <= bounds$old)
+  minPos <- which.min(globMean[inInt])
+  minAge <- bins[inInt[minPos]]
+  maxPos <- which.max(globMean[inInt])
+  maxAge <- bins[inInt[maxPos]]
+  range(globMean[inInt])
+  ints[r,c('minAge','maxAge','minT','maxT')] <- 
+    c(minAge, maxAge, range(globMean[inInt]))
+}
+
+# plot time series of global MAT
+globDat <- data.frame(bins, globMean)
+globTseries <- ggplot() +
+  theme_bw() +
+  scale_y_continuous('global MAT (C)') +
+  scale_x_continuous('time (ka), 8ky intervals', expand=c(0,0),
+                     limits=c(-800,0), breaks=seq(-800,0,by=100),
+                     labels=paste(seq(800,0,by=-100))) +
+  geom_line(data=globDat, aes(x=-bins, y=globMean)) +
+  geom_point(data=globDat, aes(x=-bins, y=globMean)) +
+  geom_point(data=ints, aes(x=-minAge, y=minT), colour='deepskyblue', size=2) +
+  geom_point(data=ints, aes(x=-maxAge, y=maxT), colour='firebrick2', size=2)
+
+# prepare a framework of every pairwise comparison to compute
+# (every warm vs. cold, warm vs. warm, and cold vs. cold interval)
+wc <- expand.grid(X1=ints$minAge, X2=ints$maxAge)
+wc$type <- 'cold-warm'
+cc <- combn(ints$minAge, 2)
+cc <- data.frame(t(cc))
+cc$type <- 'cold-cold'
+ww <- combn(ints$maxAge, 2)
+ww <- data.frame(t(ww))
+ww$type <- 'warm-warm'
+intPairs <- rbind(wc, cc, ww) 
+colnames(intPairs) <- c('t1','t2','type')
+intPairs$type <- factor(intPairs$type, levels = c('cold-cold','warm-warm','cold-warm'))
+colr <- c('cold-cold'="deepskyblue",
+          'warm-warm'="firebrick2",
+          'cold-warm'="purple3")
+
+# calculate the delta MAT for given bin pairs
+globDiff <- function(pair){
+  nm1 <- paste0('X', pair['t1'])
+  nm2 <- paste0('X', pair['t2'])
+  abs(globMean[nm1] - globMean[nm2])
+}
+intPairs$deltaMAT <- apply(intPairs[,c('t1','t2')], 1, globDiff)
+mxDelta <- max(intPairs$deltaMAT) * 1.1
+deltaBoxs <- 
+  ggplot(data=intPairs) +
+  theme_bw() +
+  scale_y_continuous('abs diff in global MAT',
+                     limits=c(0,mxDelta), expand=c(0,0)
+                     ) +
+  geom_boxplot(aes(x=type, y=deltaMAT, fill=type)) +
+  theme(axis.title.x=element_blank(),
+        legend.position='none') +
+  scale_fill_manual(values=colr)
+
+# * * KDE overlap for given bin pairs -------------------------------------
+source('GSA_custom_ecospat_fcns.R')
+
+nicher <- function(dat, b1, b2, s, env, xmn, xmx, w1, w2, ...){
+  sp1rows <- which(dat$species==s & dat$bin==b1)
+  sp1 <- dat[sp1rows,env]
+  sp2rows <- which(dat$species==s & dat$bin==b2)
+  sp2 <- dat[sp2rows,env]
+  d1 <- JonesEst(sp1, w = w1, reflect = TRUE, a = xmn, b = xmx, ...)
+  d2 <- JonesEst(sp2, w = w2, reflect = TRUE, a = xmn, b = xmx, ...)
+  hell(d1, d2) 
+}
+
+# make an outer nested function, to find the survivors of the given time bin pair
+# run nicher inside; apply to object 'allPts' rather than 'outDf'
+# take the mean H among survivors; repeat for all time bin pairs
+xmn <- min(allPts[,v])
+xmx <- max(allPts[,v])
+bPairs <- as.matrix(intPairs[,c('t1','t2')])
+
+intPairs$avgH <- apply(bPairs, 1, function(x){
+  # estimate bias function for each time bin
+  # based on sampling distribution, with boundary reflection
+  sampRows1 <- which(allPts$bin==x[1] & allPts$species=='sampled')
+  sampRows2 <- which(allPts$bin==x[2] & allPts$species=='sampled')
+  samp1 <- allPts[sampRows1,v]
+  samp2 <- allPts[sampRows2,v]
+  densSamp1 <- density.reflected(samp1, lower=xmn, upper=xmx) 
+  densSamp2 <- density.reflected(samp2, lower=xmn, upper=xmx) 
+  w1 <- approxfun(densSamp1$x, densSamp1$y)
+  w2 <- approxfun(densSamp2$x, densSamp2$y)
+  
+  # Adjust for any species observations that fall just slightly
+  # outside the range of sample density estimation
+  # (because of the discretisation of the kernel estimation).
+  # Especially a problem for 4ka, upper extreme.
+  estMx <- min(max(densSamp1$x), max(densSamp2$x))
+  estMn <- max(min(densSamp1$x), min(densSamp2$x))
+  pairBool <- allPts$bin %in% x
+  adj <- allPts[pairBool,]
+  tooLow <- adj[,v] < estMn
+  adj[tooLow,v] <- estMn
+  tooHot <- adj[,v] > estMx
+  adj[tooHot,v] <- estMx
+  
+  # find species that are sufficiently sampled in both bins
+  spp1 <- allPts$species[allPts$bin==x[1]]
+  spp2 <- allPts$species[allPts$bin==x[2]]
+  surv <- intersect(spp1, spp2)
+  
+  sppH <- sapply(surv, function(s){
+    nicher(dat=adj, b1=x[1], b2=x[2], s=s, env=v, 
+           w1=w1, w2=w2, xmn=xmn, xmx=xmx)
+  })
+  mean(sppH)
+})
+
+# boxplot of mean H overlap per pairwise comparison category
+mxH <- max(intPairs$avgH) * 1.1
+ovpBoxs <- ggplot(data=intPairs) +
+  theme_bw() +
+  scale_y_continuous('mean per-sp, per-interval H',
+                     limits=c(0,mxH), expand=c(0,0)
+                     ) +
+  geom_boxplot(aes(x=type, y=avgH, fill=type)) +
+  scale_fill_manual(values=colr) +
+  theme(axis.title.x=element_blank(),
+        legend.position='none')
+
+# anova(lm(avgH ~ type, data=intPairs))
+
+# * * Combine plot panels -------------------------------------------------
+
+# align time series with MAT plot on left, since y-axes differ in digits
+pAlignd <- align_plots(deltaBoxs, globTseries, align = 'v', axis = 'l')
+
+mult_row <- plot_grid(
+  pAlignd[[1]], ovpBoxs,
+  ncol = 2,
+  rel_widths = c(1,1),
+  labels=c('B','C')
+)
+panels <- plot_grid(
+  pAlignd[[2]], mult_row,
+  labels = c('A', ''),
+  ncol=1
+  #  rel_heights = c(1, 0.5)
+)
+
+if (doTrunc){
+  panelsNm <- paste0('Figs/EES-extremes-panels_trunc_',vShrt,'_',day,'.pdf')
+} else {
+  panelsNm <- paste0('Figs/EES-extremes-panels_',vShrt,'_',day,'.pdf')
+}
+pdf(panelsNm, width=8, height=8)
+panels
+dev.off()
+
 # Global MAT vs. species optima -------------------------------------------
 
 for (cutoff in c(156, 800)){
