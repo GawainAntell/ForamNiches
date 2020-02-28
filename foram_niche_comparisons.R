@@ -443,7 +443,29 @@ pdf(multNm, width=4, height=7)
 grid.arrange(arrangeGrob(smallMult), bottom='Mean Hellinger\'s H among species') 
 dev.off()
 
-# Sampled vs. species optima ----------------------------------------------
+# * Delta global MAT vs overlap -------------------------------------------
+# note that H overlap does not indicate directly, only magnitude, of niche change
+# so should compare it with absolute differences in global MAT
+
+sumH <- function(b){
+  bBool <- intraH$bin==b
+  slc <- intraH[bBool,]
+  avgH <- mean(slc[,yNm])
+  binN <- nrow(slc)
+  c(bin=b, avgH=avgH, nSpp=binN)
+}
+Hseq <- sapply(bins, sumH)
+Hseq <- data.frame(t(Hseq))
+# all values NA at most recent time step
+Hseq <- Hseq[-nrow(Hseq),]
+
+delta <- diff(globMean)
+absDelta <- abs(delta)
+
+plot(absDelta, Hseq$avgH)
+cor(absDelta, Hseq$avgH)
+
+# Global MAT vs. species optima -------------------------------------------
 
 realSpp <- setdiff(spp, 'sampled')
 nReal <- length(realSpp)
