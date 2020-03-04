@@ -189,14 +189,40 @@ nichStats <- function(d, n=1000){
 }
 
 # Hellinger's H
-hell <- function (d1, d2) {
+hell <- function (d1, d2, extrap=TRUE) {
+  if (extrap==TRUE){
+    a <- min(d1$x, d2$x)
+    b <- max(d1$x, d2$x)
+    
+    # ensure the density estimate extends along the full x-axis
+    if (min(d1$x) > a){
+      d1$x <- c(a, d1$x)
+      d1$y <- c(0, d1$y)
+    }
+    if (min(d2$x) > a){
+      d2$x <- c(a, d2$x)
+      d2$y <- c(0, d2$y)
+    }
+    if (max(d1$x) < b){
+      d1$x <- c(d1$x, b)
+      d1$y <- c(d1$y, 0)
+    }
+    if (max(d2$x) < b){
+      d2$x <- c(d2$x, b)
+      d2$y <- c(d2$y, 0)
+    }
+  }
+  
   fun1 <- approxfun(d1$x, d1$y)
   fun2 <- approxfun(d2$x, d2$y)
   intgrnd <- function(x) sqrt(fun1(x) * fun2(x))
-  if (! identical(d1$x, d2$x)){warning('different x axes')}
   a <- max(min(d1$x), min(d2$x))
   b <- min(max(d1$x), max(d2$x))
   int <- integral(intgrnd, a, b)
+  if (int > 1){
+    int <- 1
+    warning('estimated Bhattacharyya distance greater than 1')
+  }
   h <- sqrt(1 - int)
   h
 }
