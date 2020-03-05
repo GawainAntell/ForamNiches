@@ -169,11 +169,11 @@ strappy <- function(Y, w, method='brt'){
   K2u <- function(u){
     dnorm(u)^2
   }
-  Rk <- integral(K2u, -Inf, Inf)
+  Rk <- integrate(K2u, -Inf, Inf)$value
   u2k <- function(u){
     u^2 * dnorm(u)
   }
-  mu2K <- integral(u2k, -Inf, Inf) # 1
+  mu2K <- integrate(u2k, -Inf, Inf)$value # for a Gaussian kernel, this = 1
   rtNum <- Rk * mu * cHat * 8 * sqrt(pi)
   rtDenom <- n * mu2K * 3
   rt <- (rtNum/rtDenom)^(1/5) * sgma
