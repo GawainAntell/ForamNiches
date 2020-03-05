@@ -339,11 +339,11 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
   noWeight <- any(is.null(w1), is.null(w2))
   if (! noWeight){
     d1 <- tryCatch(
-      JonesEst(sp1, w = w1, reflect = reflect, from = xmn, to = xmx, ...),
+      JonesEst(sp1, w = w1, bw='brt', reflect = reflect, a = xmn, b = xmx, ...),
       error = function(err){ list() }
     ) 
     d2 <- tryCatch(
-      JonesEst(sp2, w = w2, reflect = reflect, from = xmn, to = xmx, ...),
+      JonesEst(sp2, w = w2, bw='brt', reflect = reflect, a = xmn, b = xmx, ...),
       error = function(err){ list() }
     ) 
   } else {
@@ -365,7 +365,7 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
     }
   }
   
-  # the species may be absent in one or both bins, in which case z is an empty list
+  # the species may be absent in one or both bins, in which case d is an empty list
   if (length(d1)==0){
     data.frame(bin=NA, sp=NA, h=NA, pa=NA, pe=NA)
     
@@ -375,7 +375,7 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
     if (length(d2)==0){
       data.frame(bin=b1, sp=s, h=NA, t(stats))
     } else{
-      h <- hell(d1, d2) 
+      h <- hell(d1, d2, extrap = TRUE) 
       data.frame(bin=b1, sp=s, h=h, t(stats))
     }
   }
