@@ -7,14 +7,13 @@ library(parallel)
 library(foreach)
 library(iterators)
 library(doParallel)
-#library(PBSmapping)
 library(ggplot2)
 library(tidyr)
 
 # set whether or not to truncate to standard global temperature range
 doTrunc <- TRUE
 
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
+day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 # OPTION: skip to section 'Niche summary'
 
@@ -23,8 +22,9 @@ day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
 
 # Read in occurrence data
-occ <- read.csv('Data/foram_uniq_occs_latlong_8ka_200108.csv', stringsAsFactors=FALSE)
+occ <- read.csv('Data/foram-uniq-occs_latlong_8ka_20-03-19.csv', stringsAsFactors=FALSE)
 bins <- unique(occ$bin)
+bins <- sort(bins)
 
 # Limit analysis to species included in tree from Aze et al. 2011
 trRaw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
@@ -152,24 +152,61 @@ if (length(envCol)==1){
 sppEnv <- sppEnv[!naRows,]
 
 allEnvCols <- c(paste(envNmShort, c('surf','surfsub','sub'), sep='_'), envCol)
-df <- sppEnv[,c('species','bin','cell_number','centroid_long','centroid_lat',allEnvCols)]
+df <- sppEnv[,c('species','bin','cell_number',
+                'centroid_long','centroid_lat',
+                'coreUniq',allEnvCols)]
 
 # inspect correlation between temperature at surface (0m) and near preferred depth
 cor(sppEnv$temp_ym_0m, sppEnv$temp_ym_hab)
 # [1] 0.9597868
+
+# Enviro at unique sampled sites ------------------------------------------
+
+# get the sampling universe (env at range-through core sites) per bin
+core <- read.csv('Data/core_rangethrough_data_20-03-19.csv', stringsAsFactors=FALSE)
+colnames(core)[1] <- 'id'
+sampEnv <- function(b){
+  # for each bin, find out which cores range through the 8ky interval
+  inBin <- which(core$fad > (b-4) & core$lad < (b+4))
+  cells <- core$cell[inBin]
+  cells <- unique(cells)
+  
+  # get the env values at the core locations
+  slcEnv <- getBrik(bin=b, envNm=envNm, mods=modId)
+  for (i in 1:length(envNm)){
+    env <- envNm[i]
+    envVals <- raster::extract(slcEnv[[env]], cells)
+    # Rows = points of extraction, columns = depth layers  
+    envVals <- envVals[,dpths]
+    nmOld <- envNmShort[i]
+    nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
+    colnames(envVals) <- nmNew
+    sampled <- cbind(b, cells, envVals)
+  }
+  sampled
+}
+registerDoParallel(ncores)
+samp <- foreach(b=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
+  sampEnv(b=b)
+stopImplicitCluster()
+
+# remove records where environment is unknown
+naSampRows <- apply(samp[,-(1:2)], 1, function(r)
+    any(is.na(r))
+  )
+samp <- samp[!naSampRows,]
 
 # Truncate to standard temp range -----------------------------------------
 
 if (doTrunc){
   
 minmax <- function(df, b, env){
-  bBool <- df[,'bin']==b
+  bBool <- df[,'b']==b
   slc <- df[bBool,]
-  mn <- min(slc[,env])
-  max <- max(slc[,env])
-  c(b, mn, max)
+  rng <- range(slc[,env])
+  c(b, rng)
 }
-sampSmryM <- sapply(bins, minmax, df=df, env='temp_ym_0m')
+sampSmryM <- sapply(bins, minmax, df=samp, env='temp_ym_0m')
 sampSmry <- data.frame(t(sampSmryM))
 colnames(sampSmry) <- c('bin','min','max')
 uppr <- min(sampSmry$max)
@@ -189,7 +226,6 @@ p
 dev.off()
 
 trunc <- data.frame()
-outRows <- numeric()
 for (b in bins){
   bBool <- df$bin==b
   slc <- df[bBool,]
@@ -200,7 +236,20 @@ for (b in bins){
     slc <- slc[-out,]
   }
   trunc <- rbind(trunc, slc)
-  outRows <- c(outRows, out)
+}
+
+# apply truncation for sampled site data too
+truncSamp <- data.frame()
+for (b in bins){
+  bBool <- samp[,'b']==b
+  slc <- samp[bBool,]
+  tooBig <- which(slc[,'temp_ym_0m'] > uppr)
+  tooSmol <- which(slc[,'temp_ym_0m'] < lwr)
+  out <- c(tooBig, tooSmol)
+  if (length(out) > 0){
+    slc <- slc[-out,]
+  }
+  truncSamp <- rbind(truncSamp, slc)
 }
 
 # * Evaluate degree of truncation -----------------------------------------
@@ -236,6 +285,7 @@ table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
 # end case where data are truncated to standard temperature range
 } else {
   trunc <- df
+  truncSamp <- samp
 } 
 
 # Clean -------------------------------------------------------------------
@@ -283,28 +333,15 @@ trunc <- trunc[keepBool,]
 binsObs <- sort(unique(trunc$bin))
 any(diff(binsObs) != binL)
 
-# Calculate 'sampled' environment from all occs in every bin
-# analogous to the calculations for each species.
-# Note: some species may be at same cell in a bin, so omit duplicates.
-getSamp <- function(bin, dat, binCol, cellCol){
-  slcBool <- dat[,binCol] == bin
-  slc <- dat[slcBool,]
-  slcCells <- slc[,cellCol]
-  dupes <- duplicated(slc[,cellCol])
-  smpld <- slc[!dupes,]
-  smpld$species <- 'sampled'
-  rtrn <- rbind(slc, smpld)
-  rtrn
-}
-outL <- lapply(bins, getSamp, dat=trunc, binCol='bin', cellCol='cell_number')
-outDf <- do.call(rbind, outL)
-
 if (doTrunc){
-  outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_trunc_',day,'.csv')
+  obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_trunc_',day,'.csv')
+  sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_trunc_',day,'.csv')
 } else {
-  outNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
+  obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
+  sampNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
 }
-write.csv(outDf, outNm, row.names = FALSE)
+write.csv(trunc, obsNm, row.names = FALSE)
+write.csv(truncSamp, sampNm, row.names = FALSE)
 
 # Niche summary -----------------------------------------------------------
 
@@ -312,16 +349,16 @@ source('GSA_custom_ecospat_fcns.R')
 
 # if not running any sections above, load the data:
 if (doTrunc){
-  outDf <- read.csv("Data/foram_MAT_occs_latlong_8ka_trunc_200213.csv",
+  outDf <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_20-03-19.csv',
                     stringsAsFactors = FALSE)
 } else {
-  outDf <- read.csv("Data/foram_MAT_occs_latlong_8ka_200213.csv",
+  outDf <- read.csv('Data/foram_MAT_occs_latlong_8ka_20-03-19.csv',
                     stringsAsFactors = FALSE)
 }
 spp <- unique(outDf$species)
 bins <- unique(outDf$bin)
 nbins <- length(bins)
-envCol <- c("temp_ym_hab","temp_ym_0m")
+envCol <- c('temp_ym_hab','temp_ym_0m')
 ncores <- detectCores() - 1
 
 # * KDE niche summary -----------------------------------------------------
