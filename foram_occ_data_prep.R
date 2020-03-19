@@ -50,7 +50,7 @@ for (cr in corsUniq){
   }
 }
 write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
-badID <- unique(problm$coreID)
+badID <- unique(problm$coreUniq)
 
 cors2use <- ! corsUniq %in% badID
 corsUniqCln <- corsUniq[cors2use]
@@ -61,8 +61,15 @@ corInfo <- function(cr){
   c(crDf$longitude[1], crDf$latitude[1], ageRng)
 }
 corMat <- sapply(corsUniqCln, corInfo)
-corAtts <- t(data.frame(corMat))
+corAtts <- data.frame(t(corMat))
 colnames(corAtts) <- c('long','lat','lad','fad')
+
+# rasterize to the resolution of GCM data
+rEmpt <- raster(ncols=288, nrows=144, xmn=-180, xmx=180, ymn=-90, ymx=90)
+llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+corPts <- SpatialPoints(corAtts[,c('long','lat')], CRS(llPrj))
+corAtts$cell <- cellFromXY(rEmpt, corPts) 
+
 corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
 write.csv(corAtts, corNm)
 
@@ -237,25 +244,19 @@ shall <- which(occ$water.depth < 150)
 occ <- occ[-shall,]
 
 # Rasterize to the resolution of GCM data
-
-rEmpt <- raster(ncols=288, nrows=144, xmn=-180, xmx=180, ymn=-90, ymx=90)
-llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 palCoords <- occ[,c('pal.long','pal.lat')]
 pts <- SpatialPointsDataFrame(palCoords, data = occ, proj4string = CRS(llPrj))
-
 occ$cell_number <- cellFromXY(rEmpt, pts) 
 occ$centroid_lat <- occ$centroid_long <- NA
 occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
 
 # remove records with imprecise age estimates
-# ~13% of occurrences
 ageMods <- c('Berggren1977','Ericson1968','GTSBlow1969','Raffi2006')
 unconstrnd <- union(which(occ$age.model %in% ageMods), 
                     which(occ$rng.age > tRes/1000))
 occ <- occ[-unconstrnd,]
 
 spp <- unique(occ$species)
-
 
 # Shorten to unique occs --------------------------------------------------
 # subset by bin, then species, then find unique species-cells combinations
@@ -281,7 +282,8 @@ slcSmry <- function(dat, bin){
 nCore <- detectCores() - 1
 pt1 <- proc.time()
 registerDoParallel(nCore)
-stageDfList <- foreach(bin=bins$mid) %dopar% slcSmry(bin=bin, dat=occ)
+stageDfList <- foreach(bin=bins$mid) %dopar% 
+  slcSmry(bin=bin, dat=occ)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
