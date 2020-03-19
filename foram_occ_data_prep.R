@@ -8,13 +8,63 @@ library(doParallel)
 # Data import -------------------------------------------------------------
 
 tRes <- 8
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y%m%d')
+day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 # Read in occurrence data
 occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 
 # easier to work on scale of ka not ma
 occ$age <- occ$age*1000
+
+# Extract core range-through data -----------------------------------------
+
+# There are sometimes 2 or 3 coreID's per hole, with .a/.b/.c suffix,
+# seemingly because of differences in data entry rules.
+# There are also typos of dashes and underscores mixed up.
+occ$coreID <- gsub('-','_',occ$coreID)
+occ$coreUniq <- gsub('181_1119B','181_1119',occ$coreID)
+rmSuffix <- function(txt){
+  strsplit(txt, '[.]')[[1]][1]
+}
+occ$coreUniq <- sapply(occ$coreUniq, rmSuffix)
+corsUniq <- unique(occ$coreUniq)
+
+# Note that 'core' is not a unique identifier, and many 'hole' values are NA.
+# The coreID is nearly unique, but there are mistakes.
+# Make sure that the coordinates match or are very close (< 100m)
+# and if not, then create a new coreID.
+problm <- data.frame()
+for (cr in corsUniq){
+  crRows <- which(occ$coreUniq==cr)
+  crDf <- occ[crRows,]
+  mdrnCoords <- c('longitude','latitude')
+  dupes <- duplicated(crDf[,mdrnCoords])
+  uniqCrs <- crDf[!dupes,]
+  if (nrow(uniqCrs) > 1){
+    crPts <- SpatialPoints(uniqCrs[,mdrnCoords])
+    gcdists <- spDists(crPts)
+    far <- any(gcdists > 0.1)
+    if (far){
+      problm <- rbind(problm, uniqCrs)
+    }
+  }
+}
+write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
+badID <- unique(problm$coreID)
+
+cors2use <- ! corsUniq %in% badID
+corsUniqCln <- corsUniq[cors2use]
+corInfo <- function(cr){
+  crRows <- which(occ$coreUniq==cr)
+  crDf <- occ[crRows,]
+  ageRng <- range(crDf$age)
+  c(crDf$longitude[1], crDf$latitude[1], ageRng)
+}
+corMat <- sapply(corsUniqCln, corInfo)
+corAtts <- t(data.frame(corMat))
+colnames(corAtts) <- c('long','lat','lad','fad')
+corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
+write.csv(corAtts, corNm)
 
 # Absence data --------------------------------------------------------------
 
@@ -240,7 +290,7 @@ fin <- do.call('rbind', stageDfList)
 
 # Cleaning ----------------------------------------------------------------
 
-# Subset occurrences such that eas sp has >5 occs per bin
+# Subset occurrences such that each sp has >5 occs per bin
 saveRows <- function(sp, bin, df){
   spRows <- which(df$species==sp & df$bin==bin)
   if (length(spRows)>5){
@@ -254,5 +304,5 @@ keepRowsL <- sapply(spp, function(x){
 keepRows <- unlist(keepRowsL)
 fin <- fin[keepRows,]
 
-dfNm <- paste('Data/foram_uniq_occs_latlong_',tRes, 'ka_', day, '.csv', sep='')
+dfNm <- paste('Data/foram-uniq-occs_latlong_',tRes, 'ka_', day, '.csv', sep='')
 write.csv(fin, file=dfNm, row.names=FALSE)
