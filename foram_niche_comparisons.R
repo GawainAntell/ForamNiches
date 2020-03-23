@@ -15,15 +15,17 @@ doTrunc <- TRUE
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 if (doTrunc){
-  df <- read.csv("Data/foram_niche_sumry_metrics_trunc_200214.csv", stringsAsFactors=FALSE)
-  allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_200213.csv')
+  df <- read.csv('Data/foram_niche_sumry_metrics_trunc_20-03-23.csv', stringsAsFactors=FALSE)
+  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_trunc_20-03-19.csv',
+                   stringsAsFactors = FALSE)
   v <- 'temp_ym_0m'
   # See note on niche construction script: if truncating temp by surface values,
   # it doesn't make sense to use in-habitat temperature downstream.
 } else {
-  df <- read.csv("Data/foram_niche_sumry_metrics_200214.csv", stringsAsFactors=FALSE)
-  allPts <- read.csv('Data/foram_MAT_occs_latlong_8ka_200213.csv')
-  v <- 'temp_ym_hab'
+  df <- read.csv('Data/foram_niche_sumry_metrics_20-03-23.csv', stringsAsFactors=FALSE)
+  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_20-03-23.csv',
+                   stringsAsFactors = FALSE)
+  v <- 'temp_ym_0m' # 'temp_ym_hab'
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -77,33 +79,28 @@ nich <- splitSpp[keepBool,]
 
 # Sampled vs global MAT corr ----------------------------------------------
 
-# calculate mean absolute latitude at sampling points
-allSampBool <- allPts$species=='sampled'
-allSamp <- allPts[allSampBool,]
-absLat <- sapply(bins, function(b){
-  slcBool <- allSamp$bin==b
-  slc <- allSamp[slcBool,]
-  abslat <- abs(slc$centroid_lat)
-  mean(abslat)
-})
-
 # calculate mean MAT over globe, at set grid of points
 glob <- read.csv('Data/global_surface_MAT_at_grid_pts_4ka.csv')
 cols <- paste0('X',bins)
 globMean <- colMeans(glob[,cols])
 
 # combine with sampling n and mean MAT
-sampBool <- nich$sp=='sampled1'
-samp <- nich[sampBool,]
-sampMean <- samp$m_temp_ym_0m
-logSampN <- log(samp$n)
+sampSumry <- sapply(bins, function(b){
+  slcBool <- samp$b==b
+  slc <- samp[slcBool,]
+  temp <- mean(slc$temp_ym_0m)
+  n <- nrow(slc)
+  c(temp,n)
+})
+sampSumry <- data.frame(t(sampSumry))
+colnames(sampSumry) <- c('mat','n')
 
-# no autocorrelation in residuals of main relationship of interest
-l <- lm(sampMean~globMean)
+# autocorrelation in residuals of main relationship of interest
+l <- lm(sampSumry$mat~globMean)
 r <- resid(l)
 acf(r)
 
-corVars <- cbind(logSampN, absLat, sampMean, globMean)
+corVars <- cbind(n=sampSumry$n, sampMean=sampSumry$mat, globMean)
 
 # There are WAY more sampling points in the last 2 time steps -
 # these are very influential points, so exclude from cor tests.
@@ -245,7 +242,7 @@ dev.off()
 
 # Inter-spp niche overlap -------------------------------------------------
 
-pairH <- read.csv('Data/foram_species_pairs_KDE_H_200214.csv', stringsAsFactors=FALSE)
+pairH <- read.csv('Data/foram_species_pairs_KDE_H_trunc_20-03-23.csv', stringsAsFactors=FALSE)
 # Watch out - not normally distributed because of bounds at 0 and 1.
 
 pairH$bin <- factor(pairH$bin, levels = bins)
@@ -265,18 +262,15 @@ inter <-
 
 # Intra-sp niche overlap --------------------------------------------------
 
-keep <- df$sp != 'sampled'
-intraH <- df[keep,]
-intraH$y <- intraH[,yNm]
-consec <- ! is.na(intraH$y)
-intraH <- intraH[consec,]
+consec <- ! is.na(df$h)
+intraH <- df[consec,]
 intraH$shortNm <- sapply(intraH$sp, function(txt){
   splt <- strsplit(txt, ' ')
   splt[[1]][2]
 } )
 
 intra <- 
-  ggplot(data=intraH, aes(x=shortNm, y=y)) +
+  ggplot(data=intraH, aes(x=shortNm, y=h)) +
   scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
@@ -383,9 +377,10 @@ ecoLabs <- c('Mixed layer, symb',
 # 5 = high lat
 # 6 = upwelling/high productivity
 
-empt <- ggplot(data=plotDf, aes(y=y)) +
+ymx <- max(plotDf$h)*1.05
+empt <- ggplot(data=plotDf, aes(y=h)) +
   theme_bw() +
-  scale_y_continuous(limits=c(0,0.3), expand=c(0,0)) +
+  scale_y_continuous(limits=c(0,ymx), expand=c(0,0)) +
   theme(axis.title.x = element_blank())
 
 # add n-labels aligned at right of plot area
@@ -442,52 +437,46 @@ grid.arrange(arrangeGrob(smallMult), bottom='Mean Hellinger\'s H among species')
 dev.off()
 
 # * Delta global MAT vs overlap -------------------------------------------
-# note that H overlap does not indicate directly, only magnitude, of niche change
+# note that H overlap does not indicate direction, only magnitude, of niche change
 # so should compare it with absolute differences in global MAT
-for (cutoff in c(156, 800)){
-  sumH <- function(b){
-    bBool <- intraH$bin==b
-    slc <- intraH[bBool,]
-    avgH <- mean(slc[,yNm])
-    binN <- nrow(slc)
-    c(bin=b, avgH=avgH, nSpp=binN)
-  }
-  Hseq <- sapply(bins, sumH)
-  Hseq <- data.frame(t(Hseq))
-  # all values NA at most recent time step
-  Hseq <- Hseq[-nrow(Hseq),]
-  
-  delta <- diff(globMean)
-  Hseq$absDelta <- abs(delta)
-  
-  # go back in time only as far as cutoff
-  seqKeep <- Hseq$bin <= cutoff
-  Hseq <- Hseq[seqKeep,]
-  
-  ymx <- max(Hseq$avgH) * 1.1
-  xmx <- max(Hseq$absDelta) * 1.1
-  scatrCor <- cor(Hseq$absDelta, Hseq$avgH, method='spear')
-  scatrLab <- paste('rho =', round(scatrCor, 3))
-  deltaPlot <- 
-    ggplot(data=Hseq, aes(x=absDelta, y=avgH)) +
-    theme_bw() +
-    scale_x_continuous('Absolute change in global MAT (C)',
-                       limits=c(0,xmx), expand=c(0,0)) +
-    scale_y_continuous('Mean H among boundary-crossers', 
-                       limits=c(0,ymx), expand=c(0,0)) +
-    geom_point()
-  deltaPlot <- deltaPlot +
-    geom_text(aes(fontface=1), label=scatrLab,# size=3,
-              x=xmx*0.8, y=ymx*0.8)
-  if (doTrunc){
-    deltaNm <- paste0('Figs/delta-MAT-vs-mean-H_trunc_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
-  } else {
-    deltaNm <- paste0('Figs/delta-MAT-vs-mean-H_',vShrt,'_',day,'.pdf')
-  }
-  pdf(deltaNm, width=6, height=4)
-  print(deltaPlot)
-  dev.off()
+sumH <- function(b){
+  bBool <- intraH$bin==b
+  slc <- intraH[bBool,]
+  avgH <- mean(slc[,'h'])
+  binN <- nrow(slc)
+  c(bin=b, avgH=avgH, nSpp=binN)
 }
+Hseq <- sapply(bins, sumH)
+Hseq <- data.frame(t(Hseq))
+# all values NA at most recent time step
+Hseq <- Hseq[-nrow(Hseq),]
+
+delta <- diff(globMean)
+Hseq$absDelta <- abs(delta)
+
+ymx <- max(Hseq$avgH) * 1.1
+xmx <- max(Hseq$absDelta) * 1.1
+scatrCor <- cor(Hseq$absDelta, Hseq$avgH, method='spear')
+scatrLab <- paste('rho =', round(scatrCor, 3))
+deltaPlot <- 
+  ggplot(data=Hseq, aes(x=absDelta, y=avgH)) +
+  theme_bw() +
+  scale_x_continuous('Absolute change in global MAT (C)',
+                     limits=c(0,xmx), expand=c(0,0)) +
+  scale_y_continuous('Mean H among boundary-crossers', 
+                     limits=c(0,ymx), expand=c(0,0)) +
+  geom_point()
+deltaPlot <- deltaPlot +
+  geom_text(aes(fontface=1), label=scatrLab,# size=3,
+            x=xmx*0.8, y=ymx*0.8)
+if (doTrunc){
+  deltaNm <- paste0('Figs/delta-MAT-vs-mean-H_trunc_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+} else {
+  deltaNm <- paste0('Figs/delta-MAT-vs-mean-H_',vShrt,'_',day,'.pdf')
+}
+pdf(deltaNm, width=6, height=4)
+print(deltaPlot)
+dev.off()
 
 # * G-IG overlap comparisons ----------------------------------------------
 
@@ -569,25 +558,25 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx, w1, w2, ...){
   sp1 <- dat[sp1rows,env]
   sp2rows <- which(dat$species==s & dat$bin==b2)
   sp2 <- dat[sp2rows,env]
-  d1 <- JonesEst(sp1, w = w1, reflect = TRUE, a = xmn, b = xmx, ...)
-  d2 <- JonesEst(sp2, w = w2, reflect = TRUE, a = xmn, b = xmx, ...)
+  d1 <- JonesEst(sp1, w = w1, reflect = TRUE, a = xmn, b = xmx, ...) # bw='brt', 
+  d2 <- JonesEst(sp2, w = w2, reflect = TRUE, a = xmn, b = xmx, ...) # bw='brt', 
   hell(d1, d2) 
 }
 
 # make an outer nested function, to find the survivors of the given time bin pair
-# run nicher inside; apply to object 'allPts' rather than 'outDf'
-# take the mean H among survivors; repeat for all time bin pairs
-xmn <- min(allPts[,v])
-xmx <- max(allPts[,v])
+# run nicher inside. Take the mean H among survivors; repeat for all time bin pairs.
+xmn <- min(samp[,v])
+xmx <- max(samp[,v])
 bPairs <- as.matrix(intPairs[,c('t1','t2')])
 
 intPairs$avgH <- apply(bPairs, 1, function(x){
   # estimate bias function for each time bin
   # based on sampling distribution, with boundary reflection
-  sampRows1 <- which(allPts$bin==x[1] & allPts$species=='sampled')
-  sampRows2 <- which(allPts$bin==x[2] & allPts$species=='sampled')
-  samp1 <- allPts[sampRows1,v]
-  samp2 <- allPts[sampRows2,v]
+  sampRows1 <- which(samp[,'b']==x[1])
+  sampRows2 <- which(samp[,'b']==x[2])
+  samp1 <- samp[sampRows1,v]
+  samp2 <- samp[sampRows2,v]
+  # TODO consider making this NOT reflected
   densSamp1 <- density.reflected(samp1, lower=xmn, upper=xmx) 
   densSamp2 <- density.reflected(samp2, lower=xmn, upper=xmx) 
   w1 <- approxfun(densSamp1$x, densSamp1$y)
@@ -599,18 +588,19 @@ intPairs$avgH <- apply(bPairs, 1, function(x){
   # Especially a problem for 4ka, upper extreme.
   estMx <- min(max(densSamp1$x), max(densSamp2$x))
   estMn <- max(min(densSamp1$x), min(densSamp2$x))
-  pairBool <- allPts$bin %in% x
-  adj <- allPts[pairBool,]
+  pairBool <- samp[,'b'] %in% x
+  adj <- samp[pairBool,]
   tooLow <- adj[,v] < estMn
   adj[tooLow,v] <- estMn
   tooHot <- adj[,v] > estMx
   adj[tooHot,v] <- estMx
   
   # find species that are sufficiently sampled in both bins
-  spp1 <- allPts$species[allPts$bin==x[1]]
-  spp2 <- allPts$species[allPts$bin==x[2]]
+  spp1 <- df$sp[df$bin==x[1]]
+  spp2 <- df$sp[df$bin==x[2]]
   surv <- intersect(spp1, spp2)
   
+  # TODO find out why this breaks
   sppH <- sapply(surv, function(s){
     nicher(dat=adj, b1=x[1], b2=x[2], s=s, env=v, 
            w1=w1, w2=w2, xmn=xmn, xmx=xmx)
@@ -661,44 +651,36 @@ dev.off()
 
 # Global MAT vs. species optima -------------------------------------------
 
-for (cutoff in c(156, 800)){
-  dfKeep <- df$bin <= cutoff
-  dfCut <- df[dfKeep,]
-  realSpp <- setdiff(spp, 'sampled')
-  nReal <- length(realSpp)
-  
-  optCor <- function(s, var, dat){
-    spRows <- grep(s, dat$sp)
-    sDat <- dat[spRows,]
-    bNms <- paste0('X',sDat$bin)
-    gDat <- globMean[bNms]
-    mCol <- paste(var,v,sep='_')
-    cor(gDat, sDat[,mCol], method='spear')
-  }
-  
-  corsM <- sapply(realSpp, optCor, dat=dfCut, var='m')
-  corsPe <- sapply(realSpp, optCor, dat=dfCut, var='pe')
-  trt <- c(rep('mean',length(realSpp)), rep('pref env', length(realSpp)))
-  cors <- data.frame(sp=realSpp, cor=c(corsM, corsPe), metric=trt)
-  boxes <- 
-    ggplot(data=cors) +
-    geom_hline(yintercept=0, linetype='dotted') +
-    geom_boxplot(aes(x=trt, y=cor)) +
-    scale_y_continuous(name='rho corr., sp vs. global MAT', 
-                       limits=c(-1,1), expand=c(0,0)) + # c(-0.7,0.7)
-    theme(axis.title.x=element_blank())
-  
-  if (doTrunc){
-    boxesNm <- paste0('Figs/global-MAT-corr-w-sp_trunc_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
-  } else {
-    boxesNm <- paste0('Figs/global-MAT-corr-w-sp_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
-  }
-  pdf(boxesNm, width=4, height=4)
-  print(boxes)
-  dev.off()
+optCor <- function(s, var, dat){
+  spRows <- grep(s, dat$sp)
+  sDat <- dat[spRows,]
+  bNms <- paste0('X',sDat$bin)
+  gDat <- globMean[bNms]
+  cor(gDat, sDat[,var], method='spear')
+}
+
+corsM <- sapply(spp, optCor, dat=df, var='m_temp_ym_0m')
+corsPe <- sapply(spp, optCor, dat=df, var='pe')
+trt <- c(rep('mean',nspp), rep('pref env', nspp))
+cors <- data.frame(sp=spp, cor=c(corsM, corsPe), metric=trt)
+boxes <- 
+  ggplot(data=cors) +
+  geom_hline(yintercept=0, linetype='dotted') +
+  geom_boxplot(aes(x=trt, y=cor)) +
+  scale_y_continuous(name='rho corr., sp vs. global MAT', 
+                     limits=c(-1,1), expand=c(0,0)) + # c(-0.7,0.7)
+  theme(axis.title.x=element_blank())
+
+if (doTrunc){
+  boxesNm <- paste0('Figs/global-MAT-corr-w-sp_trunc_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+} else {
+  boxesNm <- paste0('Figs/global-MAT-corr-w-sp_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+}
+pdf(boxesNm, width=4, height=4)
+print(boxes)
+dev.off()
   
 #  t.test(corsM, corsPe, paired = TRUE)
-}
 
 # Time series -------------------------------------------------------------
 
@@ -714,7 +696,7 @@ sdCurr <- paste('sd', v, sep='_')
 df$m <- df[,mCurr]
 df$se <- df[,sdCurr]/sqrt(df$n)
 
-spSort <- c('sampled',sort(realSpp))
+spSort <- sort(spp)
 df$sp <- factor(df$sp, levels=spSort)
 
 tsPlot <- 
