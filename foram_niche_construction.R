@@ -15,7 +15,7 @@ doTrunc <- TRUE
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
-# OPTION: skip to section 'Niche summary'
+# TODO move everything before 'Niche summary' to foram_occ_data_prep
 
 # Data import -------------------------------------------------------------
 
@@ -222,7 +222,7 @@ p <- ggplot(data=sampSmry) + theme_bw() +
 
 pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
 pdf(pNm, width = 6, height=4)
-p
+print(p)
 dev.off()
 
 trunc <- data.frame()
@@ -275,7 +275,7 @@ bars <- ggplot(data=old, aes(fill=trunc, x= - bin)) +
 
 barNm <- paste0('Figs/truncated_data_sample_size_',day,'.pdf')
 pdf(barNm, width=6, height=4)
-bars
+print(bars)
 dev.off()
 
 # inspect the proportion of observations remaining
@@ -338,7 +338,7 @@ if (doTrunc){
   sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_trunc_',day,'.csv')
 } else {
   obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
-  sampNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
+  sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_',day,'.csv')
 }
 write.csv(trunc, obsNm, row.names = FALSE)
 write.csv(truncSamp, sampNm, row.names = FALSE)
@@ -348,12 +348,17 @@ write.csv(truncSamp, sampNm, row.names = FALSE)
 source('GSA_custom_ecospat_fcns.R')
 
 # if not running any sections above, load the data:
+# TODO rename outDf
 if (doTrunc){
   outDf <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_20-03-19.csv',
                     stringsAsFactors = FALSE)
+  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_trunc_20-03-19.csv',
+                   stringsAsFactors = FALSE)
 } else {
-  outDf <- read.csv('Data/foram_MAT_occs_latlong_8ka_20-03-19.csv',
+  outDf <- read.csv('Data/foram_MAT_occs_latlong_8ka_20-03-23.csv',
                     stringsAsFactors = FALSE)
+  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_20-03-23.csv',
+                   stringsAsFactors = FALSE)
 }
 spp <- unique(outDf$species)
 bins <- unique(outDf$bin)
@@ -428,25 +433,25 @@ bPairs <- rbind(recent, bPairs)
 
 # loop over time bins over species over environmental variables
 kdeLoop <- function(e,dat){
-  xmn <- min(dat[,e])
-  xmx <- max(dat[,e])
+  xmn <- min(samp[,e])
+  xmx <- max(samp[,e])
   
   bList <- apply(bPairs, 1, function(x){
     # estimate bias function for each time bin
     # based on sampling distribution, with boundary reflection
-    sampRows1 <- which(dat$bin==x[1] & dat$species=='sampled')
-    sampRows2 <- which(dat$bin==x[2] & dat$species=='sampled')
-    samp1 <- dat[sampRows1,e]
-    samp2 <- dat[sampRows2,e]
+    sampRows1 <- which(samp$b==x[1])
+    samp1 <- samp[sampRows1,e]
     densSamp1 <- density.reflected(samp1, from=xmn, to=xmx) 
     w1 <- approxfun(densSamp1$x, densSamp1$y)
     
     # in the most recent time bin, there is no subsequent bin
-    if (length(samp2)!=0){
+    if (is.na(x[2])){
+      w2 <- NA
+    } else {
+      sampRows2 <- which(samp$b==x[2])
+      samp2 <- samp[sampRows2,e]
       densSamp2 <- density.reflected(samp2, from=xmn, to=xmx) 
       w2 <- approxfun(densSamp2$x, densSamp2$y)
-    } else {
-      w2 <- NA
     } 
     
     sList <- lapply(spp, function(s){
@@ -461,13 +466,14 @@ kdeLoop <- function(e,dat){
   sDf[!nas,]
 }
 
-eList <- lapply(envCol, kdeLoop, dat=outDf)
 # Note: might be weird/problematic to truncate based on surface temp,
 # but then use in-habitat temp for niches. Temps at depth can get colder
 # than the standardised lower bound from surface data.
 # Perhaps an alternative to surface and in-habitat temp is to use MLD temp.
-kdeSum <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
-              suffixes=paste0('_', envCol))
+kdeSum <- kdeLoop('temp_ym_0m', outDf)
+  # eList <- lapply(envCol, kdeLoop, dat=outDf)
+  # kdeSum <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
+  #              suffixes=paste0('_', envCol))
 
 # * Non-KDE niche summary -------------------------------------------------
 
@@ -505,7 +511,7 @@ rawSumL <- lapply(spp, function(s){
 rawSum <- do.call(rbind, rawSumL)
 
 # combine KDE and raw-scale summary/sample statistics into one output file
-fullSum <- merge(kdeSum, rawSum)
+fullSum <- merge(kdeSum, rawSum, all.x=TRUE)
 if (doTrunc){
   sumNm <- paste0('Data/foram_niche_sumry_metrics_trunc_',day,'.csv') 
 } else {
@@ -519,11 +525,11 @@ interSppD <- function(b, df, env){
   xmx <- max(df[,env])
   xmn <- min(df[,env])
   
-  bSppRows <- which(df$species!='sampled' & df$bin==b)
-  bSpp <- unique(df$species[bSppRows])
+  bRows <- which(df$bin==b)
+  bSpp <- unique(df$species[bRows])
   
-  bBool <- df$bin==b
-  bSamp <- df[bBool,env]
+  bSampRows <- which(samp[,'b']==b)
+  bSamp <- samp[bSampRows,env]
   sampDens <- density.reflected(bSamp, from=xmn, to=xmx)
   w <- approxfun(sampDens$x, sampDens$y)
   
@@ -531,7 +537,7 @@ interSppD <- function(b, df, env){
   kdeL <- lapply(bSpp, function(s){
     spRows <- which(df$species==s & df$bin==b)
     sp1 <- df[spRows,env]
-    d <- JonesEst(sp1, w = w, from = xmn, to = xmx, reflect = TRUE)
+    d <- JonesEst(sp1, bw='brt', w = w, from = xmn, to = xmx, reflect = TRUE)
   }
   )
   names(kdeL) <- bSpp
@@ -551,14 +557,13 @@ interSppD <- function(b, df, env){
 }
 
 registerDoParallel(ncores)
-interLong <- foreach(e=envCol, .packages='pracma', .combine=rbind, .inorder=FALSE) %:%
-  foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
-    interSppD(b=bin, df=outDf, env=e)
+interLong <- foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
+    interSppD(b=bin, df=outDf, env='temp_ym_0m')
   }
 stopImplicitCluster()
 
 interWide <- spread(interLong, envVar, h)
-colnames(interWide)[3+1:length(envCol)] <- paste0('h_', envCol)
+colnames(interWide)[ncol(interWide)] <- 'h_temp_ym_0m'
 if (doTrunc){
   interSppNm <- paste0('Data/foram_species_pairs_KDE_H_trunc_', day, '.csv')
 } else {
