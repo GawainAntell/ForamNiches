@@ -15,15 +15,15 @@ doTrunc <- TRUE
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 if (doTrunc){
-  df <- read.csv('Data/foram_niche_sumry_metrics_trunc_20-03-23.csv', stringsAsFactors=FALSE)
-  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_trunc_20-03-19.csv',
+  df <- read.csv('Data/foram_niche_sumry_metrics_trunc_20-03-24.csv', stringsAsFactors=FALSE)
+  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_trunc_20-03-24.csv',
                    stringsAsFactors = FALSE)
   v <- 'temp_ym_0m'
   # See note on niche construction script: if truncating temp by surface values,
   # it doesn't make sense to use in-habitat temperature downstream.
 } else {
-  df <- read.csv('Data/foram_niche_sumry_metrics_20-03-23.csv', stringsAsFactors=FALSE)
-  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_20-03-23.csv',
+  df <- read.csv('Data/foram_niche_sumry_metrics_20-03-24.csv', stringsAsFactors=FALSE)
+  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_20-03-24.csv',
                    stringsAsFactors = FALSE)
   v <- 'temp_ym_0m' # 'temp_ym_hab'
 }
@@ -59,6 +59,7 @@ splitSpp <- do.call(rbind, spL)
 
 # Check for per-species continuity - ditch any lineage chuncks of < 7 time bins
 # Could reduce this to 6 bins but would have to modify paleoTS code
+# TODO is this necessary anymore? should be taken care of in revised data prep script
 longSpp <- character()
 enuf <- rep(binL, 7)
 enufTxt <- paste0(enuf, collapse='')
@@ -240,25 +241,6 @@ pdf(bubblNm, width=4, height=4)
 print(bubbl)
 dev.off()
 
-# Inter-spp niche overlap -------------------------------------------------
-
-pairH <- read.csv('Data/foram_species_pairs_KDE_H_trunc_20-03-23.csv', stringsAsFactors=FALSE)
-# Watch out - not normally distributed because of bounds at 0 and 1.
-
-pairH$bin <- factor(pairH$bin, levels = bins)
-
-# ggplot calls the variables directly - cannot give names as characters
-# so duplicate the relevant enviro variable to a column with the consistent name 'y'
-yNm <- paste('h', v, sep='_')
-pairH$y <- pairH[,yNm]
-
-inter <- 
-  ggplot(data=pairH, aes(x=bin, y=y)) + 
-  scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
-  geom_boxplot() +
-  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=6),
-        axis.title.x = element_blank(),
-        axis.title.y = element_blank())
 
 # Intra-sp niche overlap --------------------------------------------------
 
@@ -271,23 +253,18 @@ intraH$shortNm <- sapply(intraH$sp, function(txt){
 
 intra <- 
   ggplot(data=intraH, aes(x=shortNm, y=h)) +
-  scale_y_continuous(limits=c(0,1), expand=c(0,0)) + 
+  scale_y_continuous('Hellinger\'s H', limits=c(0,1), expand=c(0,0)) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
-        axis.title.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.title.y = element_blank())
-
-y.grob <- textGrob('Hellinger\'s H distance', gp=gpar(fontface='bold', fontsize=15), rot=90)
-doubl <- plot_grid(inter, intra, nrow=1, align='h', rel_widths = c(1,0.35))
+        axis.title.x = element_blank())
 
 if (doTrunc){
-  ovrlpNm <- paste0('Figs/overlap_H_boxplots_inter_vs_intraspecific_trunc_',vShrt,day,'.pdf')
+  ovrlpNm <- paste0('Figs/overlap_H_boxplots_by_species_trunc_',vShrt,day,'.pdf')
 } else {
-  ovrlpNm <- paste0('Figs/overlap_H_boxplots_inter_vs_intraspecific_',vShrt,day,'.pdf')
+  ovrlpNm <- paste0('Figs/overlap_H_boxplots_by_species_',vShrt,day,'.pdf')
 }
-pdf(ovrlpNm, width=9, height=5)
-grid.arrange(arrangeGrob(doubl, left = y.grob))
+pdf(ovrlpNm, width=6, height=4)
+intra
 dev.off()
 
 # * Intra overlap vs evo var ----------------------------------------------
@@ -672,9 +649,9 @@ boxes <-
   theme(axis.title.x=element_blank())
 
 if (doTrunc){
-  boxesNm <- paste0('Figs/global-MAT-corr-w-sp_trunc_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+  boxesNm <- paste0('Figs/global-MAT-corr-w-sp_trunc_',vShrt,'_ka_',day,'.pdf')
 } else {
-  boxesNm <- paste0('Figs/global-MAT-corr-w-sp_',vShrt,'_to',cutoff,'ka_',day,'.pdf')
+  boxesNm <- paste0('Figs/global-MAT-corr-w-sp_',vShrt,'_ka_',day,'.pdf')
 }
 pdf(boxesNm, width=4, height=4)
 print(boxes)
