@@ -4,6 +4,12 @@ library(parallel)
 library(foreach)
 library(iterators)
 library(doParallel)
+library(phytools)
+library(paleoPhylo)
+library(ape)
+library(ggplot2)
+
+doTrunc <- FALSE
 
 # Data import -------------------------------------------------------------
 
@@ -17,6 +23,10 @@ occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 occ$age <- occ$age*1000
 
 # Extract core range-through data -----------------------------------------
+
+# No breeding populations at shallow depths, so any occurrences there are suspect
+shall <- which(occ$water.depth < 150)
+occ <- occ[-shall,]
 
 # There are sometimes 2 or 3 coreID's per hole, with .a/.b/.c suffix,
 # seemingly because of differences in data entry rules.
@@ -49,7 +59,7 @@ for (cr in corsUniq){
     }
   }
 }
-write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
+# write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
 badID <- unique(problm$coreUniq)
 
 cors2use <- ! corsUniq %in% badID
@@ -61,17 +71,17 @@ corInfo <- function(cr){
   c(crDf$longitude[1], crDf$latitude[1], ageRng)
 }
 corMat <- sapply(corsUniqCln, corInfo)
-corAtts <- data.frame(t(corMat))
-colnames(corAtts) <- c('long','lat','lad','fad')
+coreAtts <- data.frame(t(corMat))
+colnames(coreAtts) <- c('long','lat','lad','fad')
 
 # rasterize to the resolution of GCM data
 rEmpt <- raster(ncols=288, nrows=144, xmn=-180, xmx=180, ymn=-90, ymx=90)
 llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-corPts <- SpatialPoints(corAtts[,c('long','lat')], CRS(llPrj))
-corAtts$cell <- cellFromXY(rEmpt, corPts) 
+corPts <- SpatialPoints(coreAtts[,c('long','lat')], CRS(llPrj))
+coreAtts$cell <- cellFromXY(rEmpt, corPts) 
 
 corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
-write.csv(corAtts, corNm)
+write.csv(coreAtts, corNm)
 
 # Absence data --------------------------------------------------------------
 
@@ -224,7 +234,16 @@ irrel <- c('site','hole','core','section','sample.top','sample.type',
 cols2toss <- colnames(occ) %in% c(traits, irrel)
 occ <- occ[,!cols2toss]
 
-# Time binning ------------------------------------------------------------
+# Bin and rasterize -------------------------------------------------------
+
+# remove records with very imprecise age estimates
+ageMods <- c('Berggren1977','Ericson1968','GTSBlow1969','Raffi2006')
+unconstrnd <- union( which(occ$age.model %in% ageMods), 
+                     which(occ$rng.age > tRes/1000)
+                     )
+occ <- occ[-unconstrnd,]
+# all remaining records have high enough precision for binning
+  # unique(occ$rng.age)*1000
 
 brk <- seq(0, 800-tRes, by=tRes)
 bins <- data.frame(t=brk, b=brk+tRes, mid=brk+tRes/2)
@@ -235,28 +254,14 @@ bins$t[1] <- -0.1
 for (r in 1:nrow(occ)){
   a <- occ$age[r]
   bin <- which(bins$t < a & bins$b >= a)
-  aBin <- bins$mid[bin]
-  occ$bin[r] <- aBin
+  occ$bin[r] <- bins$mid[bin]
 }
-
-# No breeding populations at shallow depths, so any occurrences there are suspect
-shall <- which(occ$water.depth < 150)
-occ <- occ[-shall,]
 
 # Rasterize to the resolution of GCM data
 palCoords <- occ[,c('pal.long','pal.lat')]
 pts <- SpatialPointsDataFrame(palCoords, data = occ, proj4string = CRS(llPrj))
 occ$cell_number <- cellFromXY(rEmpt, pts) 
-occ$centroid_lat <- occ$centroid_long <- NA
 occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
-
-# remove records with imprecise age estimates
-ageMods <- c('Berggren1977','Ericson1968','GTSBlow1969','Raffi2006')
-unconstrnd <- union(which(occ$age.model %in% ageMods), 
-                    which(occ$rng.age > tRes/1000))
-occ <- occ[-unconstrnd,]
-
-spp <- unique(occ$species)
 
 # Shorten to unique occs --------------------------------------------------
 # subset by bin, then species, then find unique species-cells combinations
@@ -280,31 +285,356 @@ slcSmry <- function(dat, bin){
 }
 
 nCore <- detectCores() - 1
-pt1 <- proc.time()
 registerDoParallel(nCore)
 stageDfList <- foreach(bin=bins$mid) %dopar% 
   slcSmry(bin=bin, dat=occ)
 stopImplicitCluster()
-pt2 <- proc.time()
-pt2-pt1
 
-fin <- do.call('rbind', stageDfList)
+df <- do.call('rbind', stageDfList)
 
-# Cleaning ----------------------------------------------------------------
+# Phylo data compatability ------------------------------------------------
 
-# Subset occurrences such that each sp has >5 occs per bin
-saveRows <- function(sp, bin, df){
+# Limit analysis to species included in tree from Aze et al. 2011
+trRaw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
+trRaw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', trRaw$Species.name)
+trRaw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', trRaw$Species.name)
+tr_paleo <- with(trRaw, 
+                 as.paleoPhylo(Species.code, Ancestor.code, Start.date, End.date)
+)
+tr <- buildApe(tr_paleo)
+sppCodes <- tr$tip.label
+rowOrdr <- match(sppCodes, trRaw$Species.code)
+tr$tip.label <- trRaw$Species.name[rowOrdr]
+
+# 9 species are not present in the phylogeny, mostly because microporiferate
+sppAll <- unique(df$species)
+lostSpp <- setdiff(sppAll, tr$tip.label)
+
+# Beella megastoma is arguably the same species as B. digitata,
+# and Truncorotalia crassula is arguably senior synonym to crassaformis
+# (Schiebel and Hemleben 2017). The depth ranges for both are unknown.
+lostSpp <- c(lostSpp, 'Beella megastoma', 'Truncorotalia crassula')
+
+spp <- setdiff(sppAll, lostSpp)
+rows2toss <- ! df$species %in% spp
+df <- df[!rows2toss,]
+row.names(df) <- as.character(1:nrow(df))
+
+# Combine enviro and spp data ---------------------------------------------
+
+envNm <- c('ann_temp_ym_dpth'
+           #'month_temp_range',
+           #'month_temp_max',
+           #'month_temp_min',
+           #'ann_otracer14_ym_dpth',
+           #'ann_mixLyrDpth_ym_uo',
+           #'ann_salinity_ym_dpth',
+           #'ann_W_ym_dpth'
+)
+envNmShort <- sapply(envNm, function(txt){
+  paste(strsplit(txt,'_')[[1]][2:3], collapse='_')
+}) 
+
+# Note: code below can deal with envNm that's a vector
+
+llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+# Extract at each of 4 depths: 0, 40, 78, 164 m
+# The lower 3 correspond to surface, surface-subsurface, and subsurface species
+# and the values are based on the mean Average Living Depth of species in the dataset.
+dpths <- c(1,4,6,8)
+# Compare with the Average Living Depth of species in the dataset:
+sppDat <- read.csv('Data/foram_spp_data_20-03-23.csv', stringsAsFactors=FALSE)
+sameSpp <- sppDat$species %in% spp
+sppDat <- sppDat[sameSpp,]
+zones <- unique(sppDat$DepthHabitat)
+for (z in zones){
+  zRows <- which(sppDat$DepthHabitat==z)
+  avg <- mean(sppDat$ALD[zRows])
+  avg <- round(avg)
+  print(paste(z, avg))
+}
+# [1] "Subsurface 164"
+# [1] "Surface.subsurface 93"
+# [1] "Surface 49"
+
+source('raster_brick_import_fcn.R')
+
+modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
+bins <- unique(df$bin)
+bins <- sort(bins)
+
+addEnv <- function(bin, dat, mods, binCol, cellCol, prj, envNm){
+  slcBool <- dat[,binCol] == bin
+  slc <- dat[slcBool,]
+  slcCells <- slc[,cellCol]
+  slcEnv <- getBrik(bin=bin, envNm=envNm, mods=mods)
+  
+  for (i in 1:length(envNm)){
+    env <- envNm[i]
+    envVals <- raster::extract(slcEnv[[env]], slcCells)
+    # Rows = points of extraction, columns = depth layers  
+    envVals <- envVals[,dpths]
+    nmOld <- envNmShort[i]
+    nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
+    slc[,nmNew] <- envVals
+  } 
+  slc
+}
+
+pkgs <- c('sp','raster') 
+registerDoParallel(nCore)
+sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
+  addEnv(bin=bin, envNm=envNm, dat=df, mods=modId,
+         binCol='bin', cellCol='cell_number', prj=llPrj)
+stopImplicitCluster()
+
+# Env at preferred depth --------------------------------------------------
+
+# Species without at least 7 consecutive time bins can't be used in evo model analysis.
+# These also lack depth data, so remove them now before calculating in-habitat temp.
+keepSpp <- character()
+binL <- bins[2] - bins[1]
+enuf <- rep(binL, 7)
+enufTxt <- paste0(enuf, collapse='')
+spp <- unique(df$species)
+for (s in spp){
+  spBool <- df$species==s
+  spDf <- df[spBool,]
+  spB <- sort(unique(spDf$bin))
+  bDiff <- diff(spB)
+  diffTxt <- paste0(bDiff, collapse='')
+  srch <- grep(enufTxt,diffTxt)
+  if (length(srch) > 0){
+    keepSpp <- c(keepSpp, s)
+  }
+}
+keepBool <- df$species %in% keepSpp
+df <- df[keepBool,]
+
+habitatCol <- paste0(envNmShort, '_hab')
+sppEnv[,habitatCol] <- NA
+for (s in spp){
+  sRow <- which(sppDat$species==s)
+  habitat <- sppDat$DepthHabitat[sRow]
+  if (is.na(habitat)) next else
+  if (habitat=='Surface'){
+    habNm <- paste0(envNmShort, '_surf')
+  }
+  if (habitat=='Surface.subsurface'){
+    habNm <- paste0(envNmShort, '_surfsub')
+  }
+  if (habitat=='Subsurface'){
+    habNm <- paste0(envNmShort, '_sub')
+  }
+  
+  sBool <- sppEnv$species==s
+  sppEnv[sBool, habitatCol] <- sppEnv[sBool, habNm]
+}
+
+# Clean -------------------------------------------------------------------
+
+# remove records where environment is unknown
+envCol <- c(habitatCol, paste0(envNmShort, '_0m'))
+if (length(envCol)==1){
+  naRows <- is.na(sppEnv[,envCol])
+} else {
+  naRows <- apply(sppEnv[,envCol], 1, function(r)
+    any(is.na(r))
+  )
+}
+sppEnv <- sppEnv[!naRows,]
+
+allEnvCols <- c(paste(envNmShort, c('surf','surfsub','sub'), sep='_'), envCol)
+df <- sppEnv[,c('species','bin','cell_number',
+                'centroid_long','centroid_lat',
+                'coreUniq',allEnvCols)]
+
+# inspect correlation between temperature at surface (0m) and near preferred depth
+cor(sppEnv$temp_ym_0m, sppEnv$temp_ym_hab)
+# [1] 0.9557191
+
+# Enviro at unique sampled sites ------------------------------------------
+
+# get the sampling universe (env at range-through core sites) per bin
+# coreAtts <- read.csv('Data/core_rangethrough_data_20-03-24.csv', stringsAsFactors=FALSE)
+sampEnv <- function(b){
+  # for each bin, find out which cores range through the 8ky interval
+  inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad < (b+4))
+  cells <- coreAtts$cell[inBin]
+  cells <- unique(cells)
+  
+  # get the env values at the core locations
+  slcEnv <- getBrik(bin=b, envNm=envNm, mods=modId)
+  for (i in 1:length(envNm)){
+    env <- envNm[i]
+    envVals <- raster::extract(slcEnv[[env]], cells)
+    # Rows = points of extraction, columns = depth layers  
+    envVals <- envVals[,dpths]
+    nmOld <- envNmShort[i]
+    nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
+    colnames(envVals) <- nmNew
+    sampled <- cbind(b, cells, envVals)
+  }
+  sampled
+}
+registerDoParallel(nCore)
+samp <- foreach(b=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
+  sampEnv(b=b)
+stopImplicitCluster()
+
+# remove records where environment is unknown
+naSampRows <- apply(samp[,-(1:2)], 1, function(r)
+  any(is.na(r))
+)
+samp <- samp[!naSampRows,]
+
+# Truncate to standard temp range -----------------------------------------
+
+# Truncate series to the last 700 ka, encompassing 7 glacial/interglacial cycles
+trimBool <- df$bin <= 700
+df <- df[trimBool,]
+sampTrim <- samp[,'b'] <= 700
+samp <- samp[sampTrim,]
+bins <- bins[bins <= 700]
+
+if (doTrunc){
+  
+  minmax <- function(df, b, env){
+    bBool <- df[,'b']==b
+    slc <- df[bBool,]
+    rng <- range(slc[,env])
+    c(b, rng)
+  }
+  sampSmryM <- sapply(bins, minmax, df=samp, env='temp_ym_0m')
+  sampSmry <- data.frame(t(sampSmryM))
+  colnames(sampSmry) <- c('bin','min','max')
+  uppr <- min(sampSmry$max)
+  lwr <- max(sampSmry$min)
+  
+  p <- ggplot(data=sampSmry) + theme_bw() +
+    scale_x_continuous(name='Time (ka)', expand=c(0.01,0)) +
+    scale_y_continuous(name = 'MAT (degrees C)') +
+    geom_linerange(aes(x=-bin, ymin=min, ymax=max), colour='red') +
+    geom_linerange(aes(x=-bin, ymin=lwr, ymax=uppr), colour='black') +
+    geom_hline(yintercept=uppr, colour='grey', lwd=1) +
+    geom_hline(yintercept=lwr, colour='grey', lwd=1)
+  
+  pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
+  pdf(pNm, width = 6, height=4)
+  print(p)
+  dev.off()
+  
+  trunc <- data.frame()
+  for (b in bins){
+    bBool <- df$bin==b
+    slc <- df[bBool,]
+    tooBig <- which(slc$temp_ym_0m > uppr)
+    tooSmol <- which(slc$temp_ym_0m < lwr)
+    out <- c(tooBig, tooSmol)
+    if (length(out) > 0){
+      slc <- slc[-out,]
+    }
+    trunc <- rbind(trunc, slc)
+  }
+  
+  # apply truncation for sampled site data too
+  truncSamp <- data.frame()
+  for (b in bins){
+    bBool <- samp[,'b']==b
+    slc <- samp[bBool,]
+    tooBig <- which(slc[,'temp_ym_0m'] > uppr)
+    tooSmol <- which(slc[,'temp_ym_0m'] < lwr)
+    out <- c(tooBig, tooSmol)
+    if (length(out) > 0){
+      slc <- slc[-out,]
+    }
+    truncSamp <- rbind(truncSamp, slc)
+  }
+  
+  # * Evaluate degree of truncation -----------------------------------------
+  
+  df$trunc <- 'in range'
+  tooBig <- which(df$temp_ym_0m > uppr)
+  tooSmol <- which(df$temp_ym_0m < lwr)
+  df$trunc[tooBig] <- 'high'
+  df$trunc[tooSmol] <- 'low'
+  
+  mdrnBool <- df$bin %in% bins[1:2]
+  mdrn <- df[mdrnBool,]
+  old <- df[!mdrnBool,]
+  old$trunc <- factor(old$trunc, levels=c('high','low','in range'))
+  bars <- ggplot(data=old, aes(fill=trunc, x= - bin)) + 
+    scale_x_continuous(name='time (excluding last 16 ka)', expand=c(0.01,0)) +
+    scale_y_continuous(expand=c(0,0)) +
+    #  theme_bw() +
+    geom_bar(position="stack", width = 5) +
+    scale_fill_manual(name='MAT value in relation to cutoffs', 
+                      values=c('plum','gold','grey20')) +
+    theme(legend.position = 'top')
+  
+  barNm <- paste0('Figs/truncated_data_sample_size_',day,'.pdf')
+  pdf(barNm, width=6, height=4)
+  print(bars)
+  dev.off()
+  
+  # inspect the proportion of observations remaining
+  nrow(trunc)/nrow(df) # all data
+  table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
+  
+  # end case where data are truncated to standard temperature range
+} else {
+  trunc <- df
+  truncSamp <- samp
+} 
+
+# Clean -------------------------------------------------------------------
+
+# The last steps could introduce species with <6 occs.
+# Subset again such that each sp has >5 occs per bin.
+tooRare <- function(sp, bin, df){
   spRows <- which(df$species==sp & df$bin==bin)
-  if (length(spRows)>5){
+  if (length(spRows)<6){
     spRows
   }
 }  
-keepRowsL <- sapply(spp, function(x){
-  sapply(bins$mid, function(b) saveRows(sp=x, bin=b, df=fin))
-} 
-)
-keepRows <- unlist(keepRowsL)
-fin <- fin[keepRows,]
+tossRowsL <- 
+  sapply(spp, function(x){
+    sapply(bins, function(b){
+      tooRare(sp=x, bin=b, df=trunc)
+    } )
+  } )
+tossRows <- unlist(tossRowsL)
+trunc <- trunc[-tossRows,]
 
-dfNm <- paste('Data/foram-uniq-occs_latlong_',tRes, 'ka_', day, '.csv', sep='')
-write.csv(fin, file=dfNm, row.names=FALSE)
+# Also re-check for per-species continuity through time 
+# (at least 7 successive steps of 8ka)
+keepSpp <- character()
+spp <- unique(trunc$species)
+for (s in spp){
+  spBool <- trunc$species==s
+  spDf <- trunc[spBool,]
+  spB <- sort(unique(spDf$bin))
+  bDiff <- diff(spB)
+  diffTxt <- paste0(bDiff, collapse='')
+  srch <- grep(enufTxt,diffTxt)
+  if (length(srch) > 0){
+    keepSpp <- c(keepSpp, s)
+  }
+}
+keepBool <- trunc$species %in% keepSpp
+trunc <- trunc[keepBool,]
+
+# check for any gaps in the time series
+binsObs <- sort(unique(trunc$bin))
+if (any(diff(binsObs) != binL)) warning('discontinuous time bins')
+
+if (doTrunc){
+  obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_trunc_',day,'.csv')
+  sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_trunc_',day,'.csv')
+} else {
+  obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
+  sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_',day,'.csv')
+}
+write.csv(trunc, obsNm, row.names = FALSE)
+write.csv(truncSamp, sampNm, row.names = FALSE)
