@@ -10,28 +10,27 @@ library(tidyr)
 # Data prep ---------------------------------------------------------------
 
 # set whether or not to truncate to standard global temperature range
-doTrunc <- TRUE
+doTrunc <- FALSE
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 source('GSA_custom_ecospat_fcns.R')
 
 # if not running any sections above, load the data:
-# TODO rename outDf
 if (doTrunc){
-  outDf <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_20-03-24.csv',
+  df <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_20-03-24.csv',
                     stringsAsFactors = FALSE)
   samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_trunc_20-03-24.csv',
                    stringsAsFactors = FALSE)
 } else {
-  outDf <- read.csv('Data/foram_MAT_occs_latlong_8ka_20-03-24.csv',
+  df <- read.csv('Data/foram_MAT_occs_latlong_8ka_20-03-24.csv',
                     stringsAsFactors = FALSE)
   samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_20-03-24.csv',
                    stringsAsFactors = FALSE)
 }
 
-spp <- unique(outDf$species)
-bins <- unique(outDf$bin)
+spp <- unique(df$species)
+bins <- unique(df$bin)
 nbins <- length(bins)
 envCol <- c('temp_ym_hab','temp_ym_0m')
 ncores <- detectCores() - 1
@@ -144,8 +143,8 @@ kdeLoop <- function(e,dat){
 # but then use in-habitat temp for niches. Temps at depth can get colder
 # than the standardised lower bound from surface data.
 # Perhaps an alternative to surface and in-habitat temp is to use MLD temp.
-kdeSum <- kdeLoop('temp_ym_0m', outDf)
-  # eList <- lapply(envCol, kdeLoop, dat=outDf)
+kdeSum <- kdeLoop('temp_ym_0m', df) # TODO put this in parallel - otherwise 4 hours!
+  # eList <- lapply(envCol, kdeLoop, dat=df)
   # kdeSum <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
   #              suffixes=paste0('_', envCol))
 
@@ -178,7 +177,7 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
 }
 
 rawSumL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=outDf, 
+  temp <- lapply(bins, sumup, s=s, dat=df, 
                  binCol='bin', sCol='species', traitCol=envCol)
   tempDf <- do.call(rbind, temp)
 })
@@ -232,7 +231,7 @@ interSppD <- function(b, df, env){
 
 registerDoParallel(ncores)
 interLong <- foreach(bin=bins, .packages='pracma', .combine=rbind, .inorder=FALSE) %dopar% {
-    interSppD(b=bin, df=outDf, env='temp_ym_0m')
+    interSppD(b=bin, df=df, env='temp_ym_0m')
   }
 stopImplicitCluster()
 
