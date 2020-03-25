@@ -31,13 +31,12 @@ if (doTrunc){
 
 spp <- unique(df$species)
 bins <- unique(df$bin)
-nbins <- length(bins)
 envCol <- c('temp_ym_hab','temp_ym_0m')
-ncores <- detectCores() - 1
+nCore <- detectCores() - 1
 
 # KDE niche summary -------------------------------------------------------
 
-# Output niche overlap (though time), peak abundance, preferred enviro, & tolerance
+# Output 1 sp's niche overlap (though time), peak abundance, & preferred enviro
 nicher <- function(dat, b1, b2, s, env, xmn, xmx,
                    w1 = NULL, w2 = NULL, reflect = FALSE, ...){
   
@@ -94,59 +93,66 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
   }
 }
 
-# the older bin is column 1, the younger is column 2
-bPairs <- cbind(bins[-1], bins[-length(bins)])
+kde <- function(e, dat, bPair, xmn, xmx){
+  b1 <- bPair[1]
+  b2 <- bPair[2]
+  
+  # estimate bias function for each time bin based on sampling distribution
+  sampRows1 <- which(samp$b==b1)
+  samp1 <- samp[sampRows1,e]
+  densSamp1 <- density(samp1, bw='SJ-ste', from=xmn, to=xmx)
+  #  densSamp1 <- density.reflected(samp1, lower=xmn, upper=xmx) 
+  w1 <- approxfun(densSamp1$x, densSamp1$y)
+  
+  # in the most recent time bin, there is no subsequent bin
+  if (is.na(b2)){
+    w2 <- NA
+  } else {
+    sampRows2 <- which(samp$b==b2)
+    samp2 <- samp[sampRows2,e]
+    densSamp2 <- density(samp2, bw='SJ-ste', from=xmn, to=xmx)
+    #    densSamp2 <- density.reflected(samp2, lower=xmn, upper=xmx) 
+    w2 <- approxfun(densSamp2$x, densSamp2$y)
+  } 
+  
+  # redefine axis limits - discretization of samp KDE will shrink them a bit
+  lim1 <- range(densSamp1$x)
+  lim2 <- range(densSamp2$x)
+  xmn <- max(lim1[1], lim2[1])
+  xmx <- min(lim1[2], lim2[2])
+  
+  sList <- lapply(spp, function(s){
+    nicher(dat = dat, b1 = b1, b2 = b2, s = s, env = e, 
+           w1 = w1, w2 = w2, xmn = xmn, xmx = xmx)
+  })
+  do.call(rbind, sList)
+}
+
 # for the most recent time bin, it's not possible to calculate overlap
 # (because no modern data are included), but include it anyway
 # so that the standing niche at the last time bin is calculated
-recent <- cbind(4, NA)
-bPairs <- rbind(recent, bPairs)
-
-# loop over time bins over species over environmental variables
-kdeLoop <- function(e,dat){
-  xmn <- min(samp[,e])
-  xmx <- max(samp[,e])
-  
-  bList <- apply(bPairs, 1, function(x){
-    # estimate bias function for each time bin
-    # based on sampling distribution, with boundary reflection
-    sampRows1 <- which(samp$b==x[1])
-    samp1 <- samp[sampRows1,e]
-    densSamp1 <- density(samp1, bw='SJ-ste', from=xmn, to=xmx)
-#    densSamp1 <- density.reflected(samp1, from=xmn, to=xmx) # typo - should be lower/upper not from/to
-    w1 <- approxfun(densSamp1$x, densSamp1$y)
-    
-    # in the most recent time bin, there is no subsequent bin
-    if (is.na(x[2])){
-      w2 <- NA
-    } else {
-      sampRows2 <- which(samp$b==x[2])
-      samp2 <- samp[sampRows2,e]
-      densSamp2 <- density(samp2, bw='SJ-ste', from=xmn, to=xmx)
-#      densSamp2 <- density.reflected(samp2, from=xmn, to=xmx) # typo - should be lower/upper not from/to
-      w2 <- approxfun(densSamp2$x, densSamp2$y)
-    } 
-    
-    sList <- lapply(spp, function(s){
-      nicher(dat = dat, b1 = x[1], b2 = x[2], s = s, env = e, 
-             w1 = w1, w2 = w2, xmn = xmn, xmx = xmx)
-    })
-    do.call(rbind, sList)
-  })
-  sDf <- do.call(rbind, bList)
-  # remove NA rows (if a species is not sampled in the focal bin)
-  nas <- is.na(sDf$bin)
-  sDf[!nas,]
+pairL <- list()
+bPairs <- cbind(bins, c(NA, bins[-length(bins)]) )
+for (i in 1:length(bins)){
+  entry <- bPairs[i,]
+  pairL <- append(pairL, list(entry))
 }
 
 # Note: might be weird/problematic to truncate based on surface temp,
 # but then use in-habitat temp for niches. Temps at depth can get colder
 # than the standardised lower bound from surface data.
 # Perhaps an alternative to surface and in-habitat temp is to use MLD temp.
-kdeSum <- kdeLoop('temp_ym_0m', df) # TODO put this in parallel - otherwise 4 hours!
-  # eList <- lapply(envCol, kdeLoop, dat=df)
-  # kdeSum <- merge(eList[[1]], eList[[2]], by=c('sp','bin'), no.dups=TRUE, 
-  #              suffixes=paste0('_', envCol))
+pt1 <- proc.time()
+registerDoParallel(nCore)
+kdeSum <- foreach(bPair=pairL) %dopar% 
+   kde('temp_ym_0m', df, xmn, xmx)
+stopImplicitCluster()
+pt2 <- proc.time()
+pt2-pt1
+
+# remove NA rows (if a species is not sampled in the focal bin)
+nas <- is.na(kdeSum$bin)
+kdeSum <- kdeSum[!nas,]
 
 # Non-KDE niche summary ---------------------------------------------------
 
