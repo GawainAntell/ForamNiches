@@ -9,8 +9,6 @@ library(paleoPhylo)
 library(ape)
 library(ggplot2)
 
-doTrunc <- TRUE
-
 # Data import -------------------------------------------------------------
 
 tRes <- 8
@@ -468,96 +466,88 @@ df <- df[trimBool,]
 sampTrim <- samp[,'b'] <= 700
 samp <- samp[sampTrim,]
 bins <- bins[bins <= 700]
+  
+minmax <- function(df, b, env){
+  bBool <- df[,'b']==b
+  slc <- df[bBool,]
+  rng <- range(slc[,env])
+  c(b, rng)
+}
+sampSmryM <- sapply(bins, minmax, df=samp, env='temp_ym_0m')
+sampSmry <- data.frame(t(sampSmryM))
+colnames(sampSmry) <- c('bin','min','max')
+uppr <- min(sampSmry$max)
+lwr <- max(sampSmry$min)
 
-if (doTrunc){
-  
-  minmax <- function(df, b, env){
-    bBool <- df[,'b']==b
-    slc <- df[bBool,]
-    rng <- range(slc[,env])
-    c(b, rng)
+p <- ggplot(data=sampSmry) + theme_bw() +
+  scale_x_continuous(name='Time (ka)', expand=c(0.01,0)) +
+  scale_y_continuous(name = 'MAT (degrees C)') +
+  geom_linerange(aes(x=-bin, ymin=min, ymax=max), colour='red') +
+  geom_linerange(aes(x=-bin, ymin=lwr, ymax=uppr), colour='black') +
+  geom_hline(yintercept=uppr, colour='grey', lwd=1) +
+  geom_hline(yintercept=lwr, colour='grey', lwd=1)
+
+pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
+pdf(pNm, width = 6, height=4)
+print(p)
+dev.off()
+
+trunc <- data.frame()
+for (b in bins){
+  bBool <- df$bin==b
+  slc <- df[bBool,]
+  tooBig <- which(slc$temp_ym_0m > uppr)
+  tooSmol <- which(slc$temp_ym_0m < lwr)
+  out <- c(tooBig, tooSmol)
+  if (length(out) > 0){
+    slc <- slc[-out,]
   }
-  sampSmryM <- sapply(bins, minmax, df=samp, env='temp_ym_0m')
-  sampSmry <- data.frame(t(sampSmryM))
-  colnames(sampSmry) <- c('bin','min','max')
-  uppr <- min(sampSmry$max)
-  lwr <- max(sampSmry$min)
-  
-  p <- ggplot(data=sampSmry) + theme_bw() +
-    scale_x_continuous(name='Time (ka)', expand=c(0.01,0)) +
-    scale_y_continuous(name = 'MAT (degrees C)') +
-    geom_linerange(aes(x=-bin, ymin=min, ymax=max), colour='red') +
-    geom_linerange(aes(x=-bin, ymin=lwr, ymax=uppr), colour='black') +
-    geom_hline(yintercept=uppr, colour='grey', lwd=1) +
-    geom_hline(yintercept=lwr, colour='grey', lwd=1)
-  
-  pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
-  pdf(pNm, width = 6, height=4)
-  print(p)
-  dev.off()
-  
-  trunc <- data.frame()
-  for (b in bins){
-    bBool <- df$bin==b
-    slc <- df[bBool,]
-    tooBig <- which(slc$temp_ym_0m > uppr)
-    tooSmol <- which(slc$temp_ym_0m < lwr)
-    out <- c(tooBig, tooSmol)
-    if (length(out) > 0){
-      slc <- slc[-out,]
-    }
-    trunc <- rbind(trunc, slc)
+  trunc <- rbind(trunc, slc)
+}
+
+# apply truncation for sampled site data too
+truncSamp <- data.frame()
+for (b in bins){
+  bBool <- samp[,'b']==b
+  slc <- samp[bBool,]
+  tooBig <- which(slc[,'temp_ym_0m'] > uppr)
+  tooSmol <- which(slc[,'temp_ym_0m'] < lwr)
+  out <- c(tooBig, tooSmol)
+  if (length(out) > 0){
+    slc <- slc[-out,]
   }
-  
-  # apply truncation for sampled site data too
-  truncSamp <- data.frame()
-  for (b in bins){
-    bBool <- samp[,'b']==b
-    slc <- samp[bBool,]
-    tooBig <- which(slc[,'temp_ym_0m'] > uppr)
-    tooSmol <- which(slc[,'temp_ym_0m'] < lwr)
-    out <- c(tooBig, tooSmol)
-    if (length(out) > 0){
-      slc <- slc[-out,]
-    }
-    truncSamp <- rbind(truncSamp, slc)
-  }
+  truncSamp <- rbind(truncSamp, slc)
+}
   
   # * Evaluate degree of truncation -----------------------------------------
   
-  df$trunc <- 'in range'
-  tooBig <- which(df$temp_ym_0m > uppr)
-  tooSmol <- which(df$temp_ym_0m < lwr)
-  df$trunc[tooBig] <- 'high'
-  df$trunc[tooSmol] <- 'low'
-  
-  mdrnBool <- df$bin %in% bins[1:2]
-  mdrn <- df[mdrnBool,]
-  old <- df[!mdrnBool,]
-  old$trunc <- factor(old$trunc, levels=c('high','low','in range'))
-  bars <- ggplot(data=old, aes(fill=trunc, x= - bin)) + 
-    scale_x_continuous(name='time (excluding last 16 ka)', expand=c(0.01,0)) +
-    scale_y_continuous(expand=c(0,0)) +
-    #  theme_bw() +
-    geom_bar(position="stack", width = 5) +
-    scale_fill_manual(name='MAT value in relation to cutoffs', 
-                      values=c('plum','gold','grey20')) +
-    theme(legend.position = 'top')
-  
-  barNm <- paste0('Figs/truncated_data_sample_size_',day,'.pdf')
-  pdf(barNm, width=6, height=4)
-  print(bars)
-  dev.off()
-  
-  # inspect the proportion of observations remaining
-  nrow(trunc)/nrow(df) # all data
-  table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
-  
-  # end case where data are truncated to standard temperature range
-} else {
-  trunc <- df
-  truncSamp <- samp
-} 
+df$trunc <- 'in range'
+tooBig <- which(df$temp_ym_0m > uppr)
+tooSmol <- which(df$temp_ym_0m < lwr)
+df$trunc[tooBig] <- 'high'
+df$trunc[tooSmol] <- 'low'
+
+mdrnBool <- df$bin %in% bins[1:2]
+mdrn <- df[mdrnBool,]
+old <- df[!mdrnBool,]
+old$trunc <- factor(old$trunc, levels=c('high','low','in range'))
+bars <- ggplot(data=old, aes(fill=trunc, x= - bin)) + 
+  scale_x_continuous(name='time (excluding last 16 ka)', expand=c(0.01,0)) +
+  scale_y_continuous(expand=c(0,0)) +
+  #  theme_bw() +
+  geom_bar(position="stack", width = 5) +
+  scale_fill_manual(name='MAT value in relation to cutoffs', 
+                    values=c('plum','gold','grey20')) +
+  theme(legend.position = 'top')
+
+barNm <- paste0('Figs/truncated_data_sample_size_',day,'.pdf')
+pdf(barNm, width=6, height=4)
+print(bars)
+dev.off()
+
+# inspect the proportion of observations remaining
+nrow(trunc)/nrow(df) # all data
+table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
 
 # Clean -------------------------------------------------------------------
 
@@ -603,12 +593,7 @@ trunc <- trunc[keepBool,]
 binsObs <- sort(unique(trunc$bin))
 if (any(diff(binsObs) != binL)) warning('discontinuous time bins')
 
-if (doTrunc){
-  obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_trunc_',day,'.csv')
-  sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_trunc_',day,'.csv')
-} else {
-  obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_',day,'.csv')
-  sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_',day,'.csv')
-}
+obsNm <- paste0('Data/foram_MAT_occs_latlong_8ka_trunc_',day,'.csv')
+sampNm <- paste0('Data/samp_MAT_occs_latlong_8ka_trunc_',day,'.csv')
 write.csv(trunc, obsNm, row.names = FALSE)
 write.csv(truncSamp, sampNm, row.names = FALSE)
