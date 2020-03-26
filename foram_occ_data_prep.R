@@ -349,7 +349,7 @@ llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 # and the values are based on the mean Average Living Depth of species in the dataset.
 dpths <- c(1,4,6,8)
 # Compare with the Average Living Depth of species in the dataset:
-sppDat <- read.csv('Data/foram_spp_data_20-03-23.csv', stringsAsFactors=FALSE)
+sppDat <- read.csv('Data/foram_spp_data_20-03-26.csv', stringsAsFactors=FALSE)
 sameSpp <- sppDat$species %in% spp
 sppDat <- sppDat[sameSpp,]
 zones <- unique(sppDat$DepthHabitat)
@@ -360,7 +360,7 @@ for (z in zones){
   print(paste(z, avg))
 }
 # [1] "Subsurface 164"
-# [1] "Surface.subsurface 93"
+# [1] "Surface.subsurface 89"
 # [1] "Surface 49"
 
 source('raster_brick_import_fcn.R')
@@ -383,6 +383,16 @@ addEnv <- function(bin, dat, mods, binCol, cellCol, prj, envNm){
     nmOld <- envNmShort[i]
     nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
     slc[,nmNew] <- envVals
+    
+    # Infer environment if it's missing and some of the adjacent 9 cells have values
+    # This reduces the number of occs without enviro from 837 to 160
+    naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
+    if (sum(naRows)>0){
+      naCoords <- slc[naRows,c('centroid_long','centroid_lat')]
+      # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
+      fillr <- raster::extract(slcEnv[[env]], naCoords, buffer=200*1000, fun=mean)
+      slc[naRows,nmNew] <- fillr[,dpths]
+    }
   } 
   slc
 }
@@ -394,70 +404,16 @@ sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dop
          binCol='bin', cellCol='cell_number', prj=llPrj)
 stopImplicitCluster()
 
-# Env at preferred depth --------------------------------------------------
-
-# Species without at least 7 consecutive time bins can't be used in evo model analysis.
-# These also lack depth data, so remove them now before calculating in-habitat temp.
-keepSpp <- character()
-binL <- bins[2] - bins[1]
-enuf <- rep(binL, 7)
-enufTxt <- paste0(enuf, collapse='')
-spp <- unique(df$species)
-for (s in spp){
-  spBool <- df$species==s
-  spDf <- df[spBool,]
-  spB <- sort(unique(spDf$bin))
-  bDiff <- diff(spB)
-  diffTxt <- paste0(bDiff, collapse='')
-  srch <- grep(enufTxt,diffTxt)
-  if (length(srch) > 0){
-    keepSpp <- c(keepSpp, s)
-  }
-}
-keepBool <- df$species %in% keepSpp
-df <- df[keepBool,]
-
-habitatCol <- paste0(envNmShort, '_hab')
-sppEnv[,habitatCol] <- NA
-for (s in spp){
-  sRow <- which(sppDat$species==s)
-  habitat <- sppDat$DepthHabitat[sRow]
-  if (is.na(habitat)) next else
-  if (habitat=='Surface'){
-    habNm <- paste0(envNmShort, '_surf')
-  }
-  if (habitat=='Surface.subsurface'){
-    habNm <- paste0(envNmShort, '_surfsub')
-  }
-  if (habitat=='Subsurface'){
-    habNm <- paste0(envNmShort, '_sub')
-  }
-  
-  sBool <- sppEnv$species==s
-  sppEnv[sBool, habitatCol] <- sppEnv[sBool, habNm]
-}
-
-# Clean -------------------------------------------------------------------
-
 # remove records where environment is unknown
-envCol <- c(habitatCol, paste0(envNmShort, '_0m'))
-if (length(envCol)==1){
-  naRows <- is.na(sppEnv[,envCol])
-} else {
-  naRows <- apply(sppEnv[,envCol], 1, function(r)
-    any(is.na(r))
-  )
-}
+allEnvNm <- paste(envNmShort, c('0m','surf','surfsub','sub'), sep='_')
+naRows <- apply(sppEnv[,allEnvNm], 1, function(r)
+  any(is.na(r))
+)
 sppEnv <- sppEnv[!naRows,]
 
-allEnvCols <- c(paste(envNmShort, c('surf','surfsub','sub'), sep='_'), envCol)
 df <- sppEnv[,c('species','bin','cell_number',
                 'centroid_long','centroid_lat',
-                'coreUniq',allEnvCols)]
-
-# inspect correlation between temperature at surface (0m) and near preferred depth
-cor(sppEnv$temp_ym_0m, sppEnv$temp_ym_hab)
-# [1] 0.9557191
+                'coreUniq',allEnvNm)]
 
 # Enviro at unique sampled sites ------------------------------------------
 
@@ -466,20 +422,30 @@ cor(sppEnv$temp_ym_0m, sppEnv$temp_ym_hab)
 sampEnv <- function(b){
   # for each bin, find out which cores range through the 8ky interval
   inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad < (b+4))
-  cells <- coreAtts$cell[inBin]
-  cells <- unique(cells)
+  slc <- coreAtts[inBin,]
+  dupeCell <- duplicated(slc$cell)
+  slc <- slc[!dupeCell,]
   
   # get the env values at the core locations
   slcEnv <- getBrik(bin=b, envNm=envNm, mods=modId)
   for (i in 1:length(envNm)){
     env <- envNm[i]
-    envVals <- raster::extract(slcEnv[[env]], cells)
+    envVals <- raster::extract(slcEnv[[env]], slc$cell)
     # Rows = points of extraction, columns = depth layers  
     envVals <- envVals[,dpths]
     nmOld <- envNmShort[i]
     nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
     colnames(envVals) <- nmNew
     sampled <- cbind(b, cells, envVals)
+    
+    # interpolate missing values from the adjacent 9 cells
+    naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
+    if (sum(naRows)>0){
+      naCoords <- slc[naRows,c('long','lat')]
+      # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
+      fillr <- raster::extract(slcEnv[[env]], naCoords, buffer=200*1000, fun=mean)
+      sampled[naRows,nmNew] <- fillr[,dpths]
+    }
   }
   sampled
 }
@@ -489,7 +455,7 @@ samp <- foreach(b=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
 stopImplicitCluster()
 
 # remove records where environment is unknown
-naSampRows <- apply(samp[,-(1:2)], 1, function(r)
+naSampRows <- apply(samp[,allEnvNm], 1, function(r)
   any(is.na(r))
 )
 samp <- samp[!naSampRows,]
@@ -613,9 +579,12 @@ tossRows <- unlist(tossRowsL)
 trunc <- trunc[-tossRows,]
 
 # Also re-check for per-species continuity through time 
-# (at least 7 successive steps of 8ka)
+# (at least 7 successive steps of 8ka i.e. 6 boundary crossings)
 keepSpp <- character()
 spp <- unique(trunc$species)
+binL <- bins[2] - bins[1]
+enuf <- rep(binL, 6)
+enufTxt <- paste0(enuf, collapse='')
 for (s in spp){
   spBool <- trunc$species==s
   spDf <- trunc[spBool,]
