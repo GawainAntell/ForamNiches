@@ -9,7 +9,7 @@ library(paleoPhylo)
 library(ape)
 library(ggplot2)
 
-doTrunc <- FALSE
+doTrunc <- TRUE
 
 # Data import -------------------------------------------------------------
 
@@ -25,7 +25,7 @@ occ$age <- occ$age*1000
 # Extract core range-through data -----------------------------------------
 
 # No breeding populations at shallow depths, so any occurrences there are suspect
-shall <- which(occ$water.depth < 150)
+shall <- which(occ$water.depth < 100)
 occ <- occ[-shall,]
 
 # There are sometimes 2 or 3 coreID's per hole, with .a/.b/.c suffix,
@@ -81,7 +81,7 @@ corPts <- SpatialPoints(coreAtts[,c('long','lat')], CRS(llPrj))
 coreAtts$cell <- cellFromXY(rEmpt, corPts) 
 
 corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
-write.csv(coreAtts, corNm)
+#write.csv(coreAtts, corNm)
 
 # Absence data --------------------------------------------------------------
 
@@ -125,7 +125,6 @@ sppDat <- occ[,c('species',traits)]
 dupes <- duplicated(sppDat$species)
 sppDat <- sppDat[!dupes,]
 
-# Depth ranges ------------------------------------------------------------
 # add modern depth ranges to sp-level file
 
 # Read in modern depth ranges: Rebotim et al 2017, table 4
@@ -203,6 +202,12 @@ glom <- c('Globoquadrina.conglomerata',
 
 dpthTbl <- rbind(dpthTbl,tumida,conglob,hexag,adamsi,glom)
 
+# Re-assign crassaformis as mid-depth as a compromise among conflicting studies. 
+# Meilland et al (2019) and Ezard et al (2015) consider the species sub-thermocline,
+# but Rebotim et al (2017) and Schiebel (2017) consider it shallow.
+crass <- which(dpthTbl$Species=='Globorotalia.crassaformis')
+dpthTbl$DepthHabitat[crass] <- 'Surface.subsurface'
+
 # Synonymize according to Microtax for congruence with occurrence database
 dpthTbl$Species <- gsub('Globorotalia.scitula','Hirsutella.scitula',dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.inflata','Globoconella.inflata',dpthTbl$Species)
@@ -226,7 +231,7 @@ sppDat[,newCols] <- NA
 spPos <- match(dpthTbl$Species, spp)
 sppDat[spPos,newCols] <- dpthTbl[,-1]
 spDatNm <- paste0('Data/foram_spp_data_',day,'.csv')
-write.csv(sppDat, spDatNm, row.names = FALSE)
+#write.csv(sppDat, spDatNm, row.names = FALSE)
 
 # cut down file size
 irrel <- c('site','hole','core','section','sample.top','sample.type',
