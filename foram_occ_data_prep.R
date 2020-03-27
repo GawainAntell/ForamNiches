@@ -90,7 +90,7 @@ naAbund <- is.na(occ$orig.abundance)
 occ <- occ[!naAbund,]
 
 uniqAbund <- unique(occ$orig.abundance)
-numAbund <- as.numeric(uniqAbund)
+numAbund <- suppressWarnings(as.numeric(uniqAbund))
 nonNum <- uniqAbund[is.na(numAbund)]
 nonNum
 
@@ -309,7 +309,7 @@ sppCodes <- tr$tip.label
 rowOrdr <- match(sppCodes, trRaw$Species.code)
 tr$tip.label <- trRaw$Species.name[rowOrdr]
 
-# 9 species are not present in the phylogeny, mostly because microporiferate
+# some species are not present in the phylogeny, mostly because microporiferate
 sppAll <- unique(df$species)
 lostSpp <- setdiff(sppAll, tr$tip.label)
 
@@ -325,20 +325,8 @@ row.names(df) <- as.character(1:nrow(df))
 
 # Combine enviro and spp data ---------------------------------------------
 
-envNm <- c('ann_temp_ym_dpth'
-           #'month_temp_range',
-           #'month_temp_max',
-           #'month_temp_min',
-           #'ann_otracer14_ym_dpth',
-           #'ann_mixLyrDpth_ym_uo',
-           #'ann_salinity_ym_dpth',
-           #'ann_W_ym_dpth'
-)
-envNmShort <- sapply(envNm, function(txt){
-  paste(strsplit(txt,'_')[[1]][2:3], collapse='_')
-}) 
-
-# Note: code below can deal with envNm that's a vector
+envNm <- 'ann_temp_ym_dpth'
+envNmShort <-  paste(strsplit(envNm,'_')[[1]][2:3], collapse='_')
 
 llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 
@@ -366,52 +354,46 @@ source('raster_brick_import_fcn.R')
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
 bins <- unique(df$bin)
 bins <- sort(bins)
+allEnvNm <- paste(envNmShort, c('0m','surf','surfsub','sub'), sep='_')
 
-addEnv <- function(bin, dat, mods, binCol, cellCol, prj, envNm){
+addEnv <- function(bin, dat, mods, binCol, cellCol, prj, env){
   slcBool <- dat[,binCol] == bin
   slc <- dat[slcBool,]
   slcCells <- slc[,cellCol]
   slcEnv <- getBrik(bin=bin, envNm=envNm, mods=mods)
   
-  for (i in 1:length(envNm)){
-    env <- envNm[i]
-    envVals <- raster::extract(slcEnv[[env]], slcCells)
-    # Rows = points of extraction, columns = depth layers  
-    envVals <- envVals[,dpths]
-    nmOld <- envNmShort[i]
-    nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
-    slc[,nmNew] <- envVals
-    
-    # Infer environment if it's missing and some of the adjacent 9 cells have values
-    # This reduces the number of occs without enviro from 837 to 160
-    naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
-    if (sum(naRows)>0){
-      naCoords <- slc[naRows,c('centroid_long','centroid_lat')]
-      # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
-      fillr <- raster::extract(slcEnv[[env]], naCoords, buffer=200*1000, fun=mean)
-      slc[naRows,nmNew] <- fillr[,dpths]
-    }
-  } 
+  envVals <- raster::extract(slcEnv[[env]], slcCells)
+  # Rows = points of extraction, columns = depth layers  
+  envVals <- envVals[,dpths]
+  slc[,allEnvNm] <- envVals
+  
+  # Infer environment if it's missing and some of the adjacent 9 cells have values
+  # This reduces the number of occs without enviro from 837 to 160
+  naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
+  if (sum(naRows)>0){
+    naCoords <- slc[naRows,c('centroid_long','centroid_lat')]
+    # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
+    fillr <- raster::extract(slcEnv[[env]], naCoords, buffer=200*1000, fun=mean)
+    slc[naRows,allEnvNm] <- fillr[,dpths]
+  }
   slc
 }
 
 pkgs <- c('sp','raster') 
 registerDoParallel(nCore)
 sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
-  addEnv(bin=bin, envNm=envNm, dat=df, mods=modId,
+  addEnv(bin=bin, env=envNm, dat=df, mods=modId,
          binCol='bin', cellCol='cell_number', prj=llPrj)
 stopImplicitCluster()
 
 # remove records where environment is unknown
-allEnvNm <- paste(envNmShort, c('0m','surf','surfsub','sub'), sep='_')
 naRows <- apply(sppEnv[,allEnvNm], 1, function(r)
   any(is.na(r))
 )
 sppEnv <- sppEnv[!naRows,]
 
-df <- sppEnv[,c('species','bin','cell_number',
-                'centroid_long','centroid_lat',
-                'coreUniq',allEnvNm)]
+obsNm <- paste0('Data/foram_uniq_occs_latlong_8ka_',day,'.csv')
+write.csv(sppEnv, obsNm, row.names = FALSE)
 
 # Enviro at unique sampled sites ------------------------------------------
 
