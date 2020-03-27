@@ -7,9 +7,6 @@ library(doParallel)
 library(ggplot2)
 library(tidyr)
 
-# set whether to do KDE based on sea surface values or habitat depth zones
-ss <- TRUE
-
 # Data prep ---------------------------------------------------------------
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
@@ -20,152 +17,127 @@ df <- read.csv('Data/foram_uniq_occs_latlong_8ka_20-03-27.csv',
                stringsAsFactors = FALSE)
 samp <- read.csv('Data/samp_uniq_occs_latlong_8ka_20-03-27.csv',
                  stringsAsFactors = FALSE)
+spAttr <- read.csv('Data/foram_spp_data_20-03-26.csv',
+                   stringsAsFactors = FALSE)
 
 envNm <- 'temp_ym'
 envCols <- grep(envNm, colnames(df))
 allEnvNm <- colnames(df)[envCols]
-df <- df[,c('species','bin','cell_number','coreUniq',allEnvNm)]
-# colnames(samp)[2] <- 'cell'
-
+df <- df[,c('species','bin',allEnvNm)] # 'cell_number','coreUniq',
+colnames(samp)[1:2] <- c('bin','cell_number')
 spp <- unique(df$species)
 bins <- unique(df$bin)
 nCore <- detectCores() - 1
 
 # Truncate to standard temp range -----------------------------------------
 
-# Truncate series to the last 700 ka, encompassing 7 glacial/interglacial cycles
+# Restrict to the last 700 ka, encompassing 7 glacial/interglacial cycles
 trimBool <- df$bin <= 700
 df <- df[trimBool,]
-sampTrim <- samp[,'b'] <= 700
+sampTrim <- samp$bin <= 700
 samp <- samp[sampTrim,]
 bins <- bins[bins <= 700]
 
+# Find the temperature thresholds for a given depth zone
 minmax <- function(df, b, env){
-  bBool <- df[,'b']==b
+  bBool <- df[,'bin']==b
   slc <- df[bBool,]
-  rng <- range(slc[,env])
-  c(b, rng)
+  range(slc[,env])
 }
 
-sampSmryM <- sapply(bins, minmax, df=samp, env='temp_ym_0m')
-sampSmry <- data.frame(t(sampSmryM))
-colnames(sampSmry) <- c('bin','min','max')
-uppr <- min(sampSmry$max)
-lwr <- max(sampSmry$min)
-
-p <- ggplot(data=sampSmry) + theme_bw() +
-  scale_x_continuous(name='Time (ka)', expand=c(0.01,0)) +
-  scale_y_continuous(name = 'MAT (degrees C)') +
-  geom_linerange(aes(x=-bin, ymin=min, ymax=max), colour='red') +
-  geom_linerange(aes(x=-bin, ymin=lwr, ymax=uppr), colour='black') +
-  geom_hline(yintercept=uppr, colour='grey', lwd=1) +
-  geom_hline(yintercept=lwr, colour='grey', lwd=1)
-
-pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
-pdf(pNm, width = 6, height=4)
-print(p)
-dev.off()
-
-trunc <- data.frame()
-for (b in bins){
-  bBool <- df$bin==b
-  slc <- df[bBool,]
-  tooBig <- which(slc$temp_ym_0m > uppr)
-  tooSmol <- which(slc$temp_ym_0m < lwr)
-  out <- c(tooBig, tooSmol)
-  if (length(out) > 0){
-    slc <- slc[-out,]
-  }
-  trunc <- rbind(trunc, slc)
-}
-
-# apply truncation for sampled site data too
-truncSamp <- data.frame()
-for (b in bins){
-  bBool <- samp[,'b']==b
-  slc <- samp[bBool,]
-  tooBig <- which(slc[,'temp_ym_0m'] > uppr)
-  tooSmol <- which(slc[,'temp_ym_0m'] < lwr)
-  out <- c(tooBig, tooSmol)
-  if (length(out) > 0){
-    slc <- slc[-out,]
-  }
-  truncSamp <- rbind(truncSamp, slc)
-}
-
-# * Evaluate degree of truncation -----------------------------------------
-
-df$trunc <- 'in range'
-tooBig <- which(df$temp_ym_0m > uppr)
-tooSmol <- which(df$temp_ym_0m < lwr)
-df$trunc[tooBig] <- 'high'
-df$trunc[tooSmol] <- 'low'
-
-mdrnBool <- df$bin %in% bins[1:2]
-mdrn <- df[mdrnBool,]
-old <- df[!mdrnBool,]
-old$trunc <- factor(old$trunc, levels=c('high','low','in range'))
-bars <- ggplot(data=old, aes(fill=trunc, x= - bin)) + 
-  scale_x_continuous(name='time (excluding last 16 ka)', expand=c(0.01,0)) +
-  scale_y_continuous(expand=c(0,0)) +
-  #  theme_bw() +
-  geom_bar(position="stack", width = 5) +
-  scale_fill_manual(name='MAT value in relation to cutoffs', 
-                    values=c('plum','gold','grey20')) +
-  theme(legend.position = 'top')
-
-barNm <- paste0('Figs/truncated_data_sample_size_',day,'.pdf')
-pdf(barNm, width=6, height=4)
-print(bars)
-dev.off()
-
-# inspect the proportion of observations remaining
-nrow(trunc)/nrow(df) # all data
-table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
-
-# Clean -------------------------------------------------------------------
-
-# The last steps could introduce species with <6 occs.
-# Subset again such that each sp has >5 occs per bin.
+# Subset such that each sp has at least 6 occs per bin.
 tooRare <- function(sp, bin, df){
   spRows <- which(df$species==sp & df$bin==bin)
   if (length(spRows)<6){
     spRows
   }
 }  
-tossRowsL <- 
-  sapply(spp, function(x){
-    sapply(bins, function(b){
-      tooRare(sp=x, bin=b, df=trunc)
-    } )
-  } )
-tossRows <- unlist(tossRowsL)
-trunc <- trunc[-tossRows,]
 
-# Also re-check for per-species continuity through time 
-# (at least 7 successive steps of 8ka i.e. 6 boundary crossings)
-keepSpp <- character()
-spp <- unique(trunc$species)
-binL <- bins[2] - bins[1]
-enuf <- rep(binL, 6)
-enufTxt <- paste0(enuf, collapse='')
-for (s in spp){
-  spBool <- trunc$species==s
-  spDf <- trunc[spBool,]
-  spB <- sort(unique(spDf$bin))
-  bDiff <- diff(spB)
-  diffTxt <- paste0(bDiff, collapse='')
-  srch <- grep(enufTxt,diffTxt)
-  if (length(srch) > 0){
-    keepSpp <- c(keepSpp, s)
-  }
+# Convert an environmental variable name to habitat name
+e2zone <- function(txt){ 
+  switch(txt, 
+         temp_ym_0m=c('Surface','Surface.subsurface','Subsurface'), 
+         temp_ym_surf='Surface',
+         temp_ym_surfsub='Surface.subsurface',
+         temp_ym_sub='Subsurface')
 }
-keepBool <- trunc$species %in% keepSpp
-trunc <- trunc[keepBool,]
 
-# check for any gaps in the time series
-binsObs <- sort(unique(trunc$bin))
-if (any(diff(binsObs) != binL)) warning('discontinuous time bins')
+truncatr <- function(e){
+  sampSmry <- sapply(bins, minmax, df=samp, env=e)
+  uppr <- min(sampSmry[2,])
+  lwr <- max(sampSmry[1,])
+  
+  # Consider only the species within the focal habitat zone
+  zone <- e2zone(e)
+  zonePos <- spAttr$DepthHabitat %in% zone
+  zoneSp <- spAttr$species[zonePos]
+  zoneDfPos <- df$species %in% zoneSp
+  zoneDf <- df[zoneDfPos,]
+  
+  trunc <- truncSamp <- data.frame()
+  for (b in bins){
+    bBool <- zoneDf$bin==b
+    slc <- zoneDf[bBool,]
+    tooBig <- which(slc[,e] > uppr)
+    tooSmol <- which(slc[,e] < lwr)
+    out <- c(tooBig, tooSmol)
+    if (length(out) > 0){
+      slc <- slc[-out,]
+    }
+    trunc <- rbind(trunc, slc)
+    
+    bBoolSamp <- samp$bin==b
+    slcSamp <- samp[bBoolSamp,]
+    tooBig <- which(slcSamp[,e] > uppr)
+    tooSmol <- which(slcSamp[,e] < lwr)
+    out <- c(tooBig, tooSmol)
+    if (length(out) > 0){
+      slcSamp <- slcSamp[-out,]
+    }
+    truncSamp <- rbind(truncSamp, slcSamp)
+  }
+  
+  # The last steps could introduce species with <6 occs.
+  tossRowsL <- 
+    sapply(spp, function(x){
+      sapply(bins, function(b){
+        tooRare(sp=x, bin=b, df=trunc)
+      } )
+    } )
+  tossRows <- unlist(tossRowsL)
+  trunc <- trunc[-tossRows,]
+  
+  # Also re-check for per-species continuity through time 
+  # (at least 7 successive steps of 8ka i.e. 6 boundary crossings)
+  keepSpp <- character()
+  spp <- unique(trunc$species)
+  binL <- bins[2] - bins[1]
+  enuf <- rep(binL, 6)
+  enufTxt <- paste0(enuf, collapse='')
+  for (s in spp){
+    spBool <- trunc$species==s
+    spDf <- trunc[spBool,]
+    spB <- sort(unique(spDf$bin))
+    bDiff <- diff(spB)
+    diffTxt <- paste0(bDiff, collapse='')
+    srch <- grep(enufTxt,diffTxt)
+    if (length(srch) > 0){
+      keepSpp <- c(keepSpp, s)
+    }
+  }
+  keepBool <- trunc$species %in% keepSpp
+  trunc <- trunc[keepBool,]
+  
+  # retain the columns necessary and sufficient for KDE
+  trunc <- trunc[,c('species','bin',e)]
+  colnames(trunc)[3] <- envNm
+  truncSamp <- truncSamp[,c('bin',e)]
+  colnames(truncSamp)[2] <- envNm
+  
+  list(sp=trunc, samp=truncSamp)
+}
+
+truncEnv <- lapply(allEnvNm, truncatr)
 
 # KDE niche summary -------------------------------------------------------
 
