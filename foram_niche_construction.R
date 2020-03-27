@@ -7,32 +7,165 @@ library(doParallel)
 library(ggplot2)
 library(tidyr)
 
-# Data prep ---------------------------------------------------------------
+# set whether to do KDE based on sea surface values or habitat depth zones
+ss <- TRUE
 
-# set whether or not to truncate to standard global temperature range
-doTrunc <- FALSE
+# Data prep ---------------------------------------------------------------
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 source('GSA_custom_ecospat_fcns.R')
 
-# if not running any sections above, load the data:
-if (doTrunc){
-  df <- read.csv('Data/foram_MAT_occs_latlong_8ka_trunc_20-03-24.csv',
-                    stringsAsFactors = FALSE)
-  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_trunc_20-03-24.csv',
-                   stringsAsFactors = FALSE)
-} else {
-  df <- read.csv('Data/foram_MAT_occs_latlong_8ka_20-03-24.csv',
-                    stringsAsFactors = FALSE)
-  samp <- read.csv('Data/samp_MAT_occs_latlong_8ka_20-03-24.csv',
-                   stringsAsFactors = FALSE)
-}
+df <- read.csv('Data/foram_uniq_occs_latlong_8ka_20-03-27.csv', 
+               stringsAsFactors = FALSE)
+samp <- read.csv('Data/samp_uniq_occs_latlong_8ka_20-03-27.csv',
+                 stringsAsFactors = FALSE)
+
+envNm <- 'temp_ym'
+envCols <- grep(envNm, colnames(df))
+allEnvNm <- colnames(df)[envCols]
+df <- df[,c('species','bin','cell_number','coreUniq',allEnvNm)]
+# colnames(samp)[2] <- 'cell'
 
 spp <- unique(df$species)
 bins <- unique(df$bin)
-envCol <- c('temp_ym_hab','temp_ym_0m')
 nCore <- detectCores() - 1
+
+# Truncate to standard temp range -----------------------------------------
+
+# Truncate series to the last 700 ka, encompassing 7 glacial/interglacial cycles
+trimBool <- df$bin <= 700
+df <- df[trimBool,]
+sampTrim <- samp[,'b'] <= 700
+samp <- samp[sampTrim,]
+bins <- bins[bins <= 700]
+
+minmax <- function(df, b, env){
+  bBool <- df[,'b']==b
+  slc <- df[bBool,]
+  rng <- range(slc[,env])
+  c(b, rng)
+}
+
+sampSmryM <- sapply(bins, minmax, df=samp, env='temp_ym_0m')
+sampSmry <- data.frame(t(sampSmryM))
+colnames(sampSmry) <- c('bin','min','max')
+uppr <- min(sampSmry$max)
+lwr <- max(sampSmry$min)
+
+p <- ggplot(data=sampSmry) + theme_bw() +
+  scale_x_continuous(name='Time (ka)', expand=c(0.01,0)) +
+  scale_y_continuous(name = 'MAT (degrees C)') +
+  geom_linerange(aes(x=-bin, ymin=min, ymax=max), colour='red') +
+  geom_linerange(aes(x=-bin, ymin=lwr, ymax=uppr), colour='black') +
+  geom_hline(yintercept=uppr, colour='grey', lwd=1) +
+  geom_hline(yintercept=lwr, colour='grey', lwd=1)
+
+pNm <- paste0('Figs/standardised_MAT_max_min_', day, '.pdf')
+pdf(pNm, width = 6, height=4)
+print(p)
+dev.off()
+
+trunc <- data.frame()
+for (b in bins){
+  bBool <- df$bin==b
+  slc <- df[bBool,]
+  tooBig <- which(slc$temp_ym_0m > uppr)
+  tooSmol <- which(slc$temp_ym_0m < lwr)
+  out <- c(tooBig, tooSmol)
+  if (length(out) > 0){
+    slc <- slc[-out,]
+  }
+  trunc <- rbind(trunc, slc)
+}
+
+# apply truncation for sampled site data too
+truncSamp <- data.frame()
+for (b in bins){
+  bBool <- samp[,'b']==b
+  slc <- samp[bBool,]
+  tooBig <- which(slc[,'temp_ym_0m'] > uppr)
+  tooSmol <- which(slc[,'temp_ym_0m'] < lwr)
+  out <- c(tooBig, tooSmol)
+  if (length(out) > 0){
+    slc <- slc[-out,]
+  }
+  truncSamp <- rbind(truncSamp, slc)
+}
+
+# * Evaluate degree of truncation -----------------------------------------
+
+df$trunc <- 'in range'
+tooBig <- which(df$temp_ym_0m > uppr)
+tooSmol <- which(df$temp_ym_0m < lwr)
+df$trunc[tooBig] <- 'high'
+df$trunc[tooSmol] <- 'low'
+
+mdrnBool <- df$bin %in% bins[1:2]
+mdrn <- df[mdrnBool,]
+old <- df[!mdrnBool,]
+old$trunc <- factor(old$trunc, levels=c('high','low','in range'))
+bars <- ggplot(data=old, aes(fill=trunc, x= - bin)) + 
+  scale_x_continuous(name='time (excluding last 16 ka)', expand=c(0.01,0)) +
+  scale_y_continuous(expand=c(0,0)) +
+  #  theme_bw() +
+  geom_bar(position="stack", width = 5) +
+  scale_fill_manual(name='MAT value in relation to cutoffs', 
+                    values=c('plum','gold','grey20')) +
+  theme(legend.position = 'top')
+
+barNm <- paste0('Figs/truncated_data_sample_size_',day,'.pdf')
+pdf(barNm, width=6, height=4)
+print(bars)
+dev.off()
+
+# inspect the proportion of observations remaining
+nrow(trunc)/nrow(df) # all data
+table(old$trunc)['in range']/nrow(old) # excluding most recent 16 ka
+
+# Clean -------------------------------------------------------------------
+
+# The last steps could introduce species with <6 occs.
+# Subset again such that each sp has >5 occs per bin.
+tooRare <- function(sp, bin, df){
+  spRows <- which(df$species==sp & df$bin==bin)
+  if (length(spRows)<6){
+    spRows
+  }
+}  
+tossRowsL <- 
+  sapply(spp, function(x){
+    sapply(bins, function(b){
+      tooRare(sp=x, bin=b, df=trunc)
+    } )
+  } )
+tossRows <- unlist(tossRowsL)
+trunc <- trunc[-tossRows,]
+
+# Also re-check for per-species continuity through time 
+# (at least 7 successive steps of 8ka i.e. 6 boundary crossings)
+keepSpp <- character()
+spp <- unique(trunc$species)
+binL <- bins[2] - bins[1]
+enuf <- rep(binL, 6)
+enufTxt <- paste0(enuf, collapse='')
+for (s in spp){
+  spBool <- trunc$species==s
+  spDf <- trunc[spBool,]
+  spB <- sort(unique(spDf$bin))
+  bDiff <- diff(spB)
+  diffTxt <- paste0(bDiff, collapse='')
+  srch <- grep(enufTxt,diffTxt)
+  if (length(srch) > 0){
+    keepSpp <- c(keepSpp, s)
+  }
+}
+keepBool <- trunc$species %in% keepSpp
+trunc <- trunc[keepBool,]
+
+# check for any gaps in the time series
+binsObs <- sort(unique(trunc$bin))
+if (any(diff(binsObs) != binL)) warning('discontinuous time bins')
 
 # KDE niche summary -------------------------------------------------------
 
@@ -100,6 +233,9 @@ kde <- function(e, dat, bPair, xmn, xmx){
   # estimate bias function for each time bin based on sampling distribution
   sampRows1 <- which(samp$b==b1)
   samp1 <- samp[sampRows1,e]
+  # Reflecting the sample curve doesn't change the sp KDE much
+  # except that the ends turn down a bit more (more convexity).
+  # Since it's more complicated and throws warnings, don't do it.
   densSamp1 <- density(samp1, bw='SJ-ste', from=xmn, to=xmx)
   #  densSamp1 <- density.reflected(samp1, lower=xmn, upper=xmx) 
   w1 <- approxfun(densSamp1$x, densSamp1$y)
@@ -111,7 +247,7 @@ kde <- function(e, dat, bPair, xmn, xmx){
     sampRows2 <- which(samp$b==b2)
     samp2 <- samp[sampRows2,e]
     densSamp2 <- density(samp2, bw='SJ-ste', from=xmn, to=xmx)
-    #    densSamp2 <- density.reflected(samp2, lower=xmn, upper=xmx) 
+    #  densSamp2 <- density.reflected(samp2, lower=xmn, upper=xmx) 
     w2 <- approxfun(densSamp2$x, densSamp2$y)
   } 
   
