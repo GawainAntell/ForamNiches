@@ -135,9 +135,11 @@ truncatr <- function(e){
   colnames(truncSamp)[2] <- envNm
   
   list(sp=trunc, samp=truncSamp)
+  # output is a list of two dataframes (species-level data & sampling data)
 }
 
 truncEnv <- lapply(allEnvNm, truncatr)
+names(truncEnv) <- allEnvNm
 
 # KDE niche summary -------------------------------------------------------
 
@@ -145,11 +147,11 @@ truncEnv <- lapply(allEnvNm, truncatr)
 nicher <- function(dat, b1, b2, s, env, xmn, xmx,
                    w1 = NULL, w2 = NULL, reflect = FALSE, ...){
   
-  sp1rows <- which(dat$species==s & dat$bin==b1)
-  sp1 <- dat[sp1rows,env]
+  sp1rows <- which(dat$sp$species==s & dat$sp$bin==b1)
+  sp1 <- dat$sp[sp1rows,envNm]
   
-  sp2rows <- which(dat$species==s & dat$bin==b2)
-  sp2 <- dat[sp2rows,env]
+  sp2rows <- which(dat$sp$species==s & dat$sp$bin==b2)
+  sp2 <- dat$sp[sp2rows,envNm]
   
   noWeight <- any(is.null(w1), is.null(w2))
   if (! noWeight){
@@ -198,13 +200,15 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
   }
 }
 
-kde <- function(e, dat, bPair, xmn, xmx){
+kde <- function(dat, bPair){
   b1 <- bPair[1]
   b2 <- bPair[2]
+  xmn <- min(dat$samp[,envNm])
+  xmx <- max(dat$samp[,envNm])
   
   # estimate bias function for each time bin based on sampling distribution
-  sampRows1 <- which(samp$b==b1)
-  samp1 <- samp[sampRows1,e]
+  sampRows1 <- which(dat$samp$bin==b1)
+  samp1 <- dat$samp[sampRows1,envNm]
   # Reflecting the sample curve doesn't change the sp KDE much
   # except that the ends turn down a bit more (more convexity).
   # Since it's more complicated and throws warnings, don't do it.
@@ -215,22 +219,29 @@ kde <- function(e, dat, bPair, xmn, xmx){
   # in the most recent time bin, there is no subsequent bin
   if (is.na(b2)){
     w2 <- NA
+    
+    # redefine axis limits - discretization of samp KDE can shrink them a bit
+    xmnNew <- min(densSamp1$x)
+    xmxNew <- max(densSamp1$x)
   } else {
-    sampRows2 <- which(samp$b==b2)
-    samp2 <- samp[sampRows2,e]
+    sampRows2 <- which(dat$samp$bin==b2)
+    samp2 <- dat$samp[sampRows2,envNm]
     densSamp2 <- density(samp2, bw='SJ-ste', from=xmn, to=xmx)
     #  densSamp2 <- density.reflected(samp2, lower=xmn, upper=xmx) 
     w2 <- approxfun(densSamp2$x, densSamp2$y)
+    
+    # redefine axis limits - discretization of samp KDE can shrink them a bit
+    lim1 <- range(densSamp1$x)
+    lim2 <- range(densSamp2$x)
+    xmnNew <- max(lim1[1], lim2[1])
+    xmxNew <- min(lim1[2], lim2[2])
   } 
-  
-  # redefine axis limits - discretization of samp KDE will shrink them a bit
-  lim1 <- range(densSamp1$x)
-  lim2 <- range(densSamp2$x)
-  xmn <- max(lim1[1], lim2[1])
-  xmx <- min(lim1[2], lim2[2])
-  
-  sList <- lapply(spp, function(s){
-    nicher(dat = dat, b1 = b1, b2 = b2, s = s, env = e, 
+  if (sum(identical(xmn, xmnNew), identical(xmx, xmxNew))!=2){
+    error('code needed after all')
+    }
+  zoneSp <- unique(dat$sp$species)
+  sList <- lapply(zoneSp, function(s){
+    nicher(dat = dat, b1 = b1, b2 = b2, s = s,
            w1 = w1, w2 = w2, xmn = xmn, xmx = xmx)
   })
   do.call(rbind, sList)
@@ -246,14 +257,15 @@ for (i in 1:length(bins)){
   pairL <- append(pairL, list(entry))
 }
 
-# Note: might be weird/problematic to truncate based on surface temp,
-# but then use in-habitat temp for niches. Temps at depth can get colder
-# than the standardised lower bound from surface data.
-# Perhaps an alternative to surface and in-habitat temp is to use MLD temp.
+# warning - this could take 1 - 2 hours
+pkg <- c('pracma','GoFKernel')
 pt1 <- proc.time()
 registerDoParallel(nCore)
-kdeSum <- foreach(bPair=pairL) %dopar% 
-   kde('temp_ym_0m', df, xmn, xmx)
+kdeSum <- foreach(dat=truncEnv[2:4], .combine=rbind, .inorder=FALSE, .packages=pkg) %:% 
+  foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar% 
+   kde(dat, bPair)
+kdeSumSS <- foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar% 
+  kde(truncEnv[[1]], bPair)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
@@ -261,47 +273,51 @@ pt2-pt1
 # remove NA rows (if a species is not sampled in the focal bin)
 nas <- is.na(kdeSum$bin)
 kdeSum <- kdeSum[!nas,]
+naSS <- is.na(kdeSumSS$bin)
+kdesumSS <- kdeSumSS[!naSS,]
 
 # Non-KDE niche summary ---------------------------------------------------
-
-# Need mean, variance, sample size, and age of trait values (MAT) for each sp & bin
+ 
+# Need mean, variance, sample size, & age of trait values for each sp & bin
 sumup <- function(bin, s, dat, binCol, sCol, traitCol){
-  slcRows <- which(dat[,binCol] == bin & dat[,sCol] == s)
+  slcRows <- which(dat$sp[,binCol] == bin & dat$sp[,sCol] == s)
   if (length(slcRows)>0){
-    slc <- dat[slcRows,]
-    x <- slc[,traitCol]
-    if (length(traitCol)==1){
-      m <- mean(x)
-      sd <- sd(x)
-      n <- length(x)
-      rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
-    } else {
-      m <- apply(x, 2, mean)
-      sd <- apply(x, 2, sd)
-      n <- nrow(x)
-      rtrn <- data.frame(cbind(bin, t(m), t(sd), n))
-      colnames(rtrn) <- c('bin', paste0('m_', traitCol), paste0('sd_', traitCol), 'n')
-      rtrn$sp <- s
-    }
-    
+    x <- dat$sp[slcRows,envNm]
+    m <- mean(x)
+    sd <- sd(x)
+    n <- length(x)
+    rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
   } else {
     rtrn <- data.frame()
   }
   return(rtrn)
 }
 
-rawSumL <- lapply(spp, function(s){
-  temp <- lapply(bins, sumup, s=s, dat=df, 
-                 binCol='bin', sCol='species', traitCol=envCol)
-  tempDf <- do.call(rbind, temp)
+# iterate over bins over species over depth habitats
+envL <- lapply(truncEnv[2:4], function(dat){
+  spL <- lapply(spp, function(s){
+    binL <- lapply(bins, sumup, s=s, dat=dat, 
+                   binCol='bin', sCol='species', traitCol=envNm)
+    binDf <- do.call(rbind, binL)
+  })
+  spDf <- do.call(rbind, spL)
 })
-rawSum <- do.call(rbind, rawSumL)
+rawSum <- do.call(rbind, envL)
 
-# combine KDE and raw-scale summary/sample statistics into one output file
+# iterate over bins over species, surface values only
+envLss <- lapply(spp, function(s){
+  binL <- lapply(bins, sumup, s=s, dat=truncEnv[[1]], 
+                 binCol='bin', sCol='species', traitCol=envNm)
+  binDf <- do.call(rbind, binL)
+})
+rawSumSS <- do.call(rbind, envLss)
+
+# combine KDE and finite sample statistics into same output
+
 fullSum <- merge(kdeSum, rawSum, all.x=TRUE)
-if (doTrunc){
-  sumNm <- paste0('Data/foram_niche_sumry_metrics_trunc_',day,'.csv') 
-} else {
-  sumNm <- paste0('Data/foram_niche_sumry_metrics_',day,'.csv')
-}
+sumNm <- paste0('Data/foram_niche_sumry_metrics_',day,'.csv')
 write.csv(fullSum, sumNm, row.names=FALSE)
+
+fullSumSS <- merge(kdeSumSS, rawSumSS, all.x=TRUE)
+sumSSnm <- paste0('Data/foram_niche_sumry_metrics_0m_',day,'.csv')
+write.csv(fullSumSS, sumSSnm, row.names=FALSE)
