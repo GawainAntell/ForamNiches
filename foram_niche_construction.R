@@ -212,11 +212,27 @@ envLss <- lapply(spp, function(s){
 rawSumSS <- do.call(rbind, envLss)
 
 # combine KDE and finite sample statistics into same output
-
 fullSum <- merge(kdeSum, rawSum, all.x=TRUE)
 sumNm <- paste0('Data/foram_niche_sumry_metrics_',day,'.csv')
 write.csv(fullSum, sumNm, row.names=FALSE)
-
 fullSumSS <- merge(kdeSumSS, rawSumSS, all.x=TRUE)
 sumSSnm <- paste0('Data/foram_niche_sumry_metrics_0m_',day,'.csv')
 write.csv(fullSumSS, sumSSnm, row.names=FALSE)
+
+# export summary for sampling environment too (all bins and depths)
+bsum <- function(d){
+  bMat <- sapply(bins, function(b){
+    bBool <- d$samp$bin==b
+    slc <- d$samp[bBool,]
+    m <- mean(slc$temp_ym)
+    sdv <- sd(slc$temp_ym)
+    nsite <- nrow(slc)
+    cbind(b, m, sdv, nsite)
+  })
+  bDf <- data.frame(t(bMat))
+  colnames(bDf) <- c('bin','m','sd','nsite')
+  bDf
+}
+sampSum <- lapply(truncEnv, bsum)
+sampSumNm <- paste0('Data/sampled_',envNm,'_bin_summary_by_depth_',day,'.rds')
+saveRDS(sampSum, sampSumNm)
