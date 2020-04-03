@@ -3,11 +3,12 @@ library(ggplot2)
 library(cowplot)
 library(grid)
 library(gridExtra)
+library(tidyr)
 
 # set whether to run analyses on surface-level or in-habitat niches
 ss <- TRUE
 
- # Data prep ---------------------------------------------------------------
+# Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 # foram data
@@ -83,12 +84,6 @@ trnslt <- function(txt){
   )
 }
 
-# testing
-s <- longSpp[1]
-dat <- tsDf
-sampDat <- samp
-spDat <- spAttr
-nmods <- 'four'
 evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   spBool <- dat$sp==s
   sp <- dat[spBool,]
@@ -148,19 +143,17 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   # Error in optim(p0, fn = logL.joint.URW, control = cl, method = meth, lower = c(NA,  : 
   # non-finite value supplied by optim
   
-  wts <- modsSp$modelFits$Akaike.wt
-  maxMod <- which.max(wts)
-  modNm <- row.names(modsSp$modelFits)[maxMod]
-  w <- max(wts)
-  params <- modsSp$parameters[modNm][[1]]
+  modes <- c('GRW','URW','Stasis','StrictStasis')
+  wts <- sapply(modes, function(m) modsSp$modelFits[m,'Akaike.wt'])
+  modNm <- names(which.max(wts))
   
   # check what model would be predicted by sampling alone for the given time bins
   sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
   sampEvo <- row.names(modsSamp$modelFits)[sampMx]
   
-  out <- data.frame(sp=s, r=sCor, bestMod=modNm, weight=w, 
-                    l=l, start=strt, samplingMod=sampEvo)
-#  out$params <- list(params)
+  out <- data.frame(sp=s, l=l, start=strt, r=sCor, 
+                    bestMod=modNm, t(wts), 
+                    samplingMod=sampEvo)
   out
 }
 
@@ -272,4 +265,54 @@ xGrob <- textGrob('Time (Ka)',
 sampNm <- paste0('Figs/sampling_time_series_by_depth_',day,'.pdf')
 pdf(sampNm, width=6, height=6)
 grid.arrange(arrangeGrob(pg, left = yGrob, bottom = xGrob))
+dev.off()
+
+# Relative model support --------------------------------------------------
+# stacked bar chart of support for each evo model, for each sequences
+
+# first 3 letters of sp epithet are unique except for ruber and rubescens
+# but BEWARE if crassula and crassaformis are later both included
+mods4$sp <- gsub('Globoturborotalita rubescens6','Globoturborotalita rbs6',
+                 mods4$sp)
+mods4$seq <- ''
+for (i in 1:nrow(mods4)){
+  binom <- mods4$sp[i]
+  sNm <- strsplit(binom, ' ')[[1]][2]
+  tri <- substr(sNm, 1, 3)
+  # if the species already has sequences, add a distinct suffix
+  nrep <- length(grep(tri, mods4$seq))
+  triUniq <- paste0(tri, nrep+1)
+  mods4$seq[i] <- triUniq
+}
+
+modLong <- pivot_longer(mods4, cols=evoModes, names_to='model', values_to='weight')
+modLong$model <- factor(modLong$model, levels=rev(evoModes))
+modLong$seq <- factor(modLong$seq, levels=rev(unique(modLong$seq)))
+
+colr <- c('StrictStasis'='#283593', 'Stasis'='#5dade2', 'URW'='#FFC300', 'GRW'='#FF5733')
+
+bars <- 
+  ggplot() +
+  theme_minimal() +
+  # use position=fill to indicate data as %, so rounding errors don't result in sum > 1  
+  geom_bar(data=modLong, aes(x=seq, y=weight, fill=model), 
+           position='fill', stat='identity', width=0.75) +
+  scale_x_discrete(name='Species sequence') +
+  scale_y_continuous(name='AIC weight', expand = c(0,0), limits=c(0,1.2),
+                     breaks = seq(0,1,by=0.25)) +
+  theme(legend.position = 'top',
+        axis.text.x = element_text(angle=90, vjust=0.5, hjust=1),
+        panel.grid = element_blank()) +
+  scale_colour_manual(name='', values=colr, aesthetics='fill')
+bars <- bars +
+  geom_text(aes(x=seq, y=1.1, label=l), data=mods4, hjust=1, size=3.2) +
+  coord_flip()
+
+if (ss){
+  barNm <- paste0('Figs/evo_model_support_barplot_0m_',day,'.pdf')
+} else {
+  barNm <- paste0('Figs/evo_model_support_barplot_hab_',day,'.pdf')
+}
+pdf(barNm, width=3.4252, height=6)
+bars
 dev.off()
