@@ -83,6 +83,12 @@ trnslt <- function(txt){
   )
 }
 
+# testing
+s <- longSpp[1]
+dat <- tsDf
+sampDat <- samp
+spDat <- spAttr
+nmods <- 'four'
 evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   spBool <- dat$sp==s
   sp <- dat[spBool,]
@@ -97,6 +103,12 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   sampDpth <- sampDat[[lvl]]
   sampBool <- sampDpth$bin %in% sBins
   sampSame <- sampDpth[sampBool,]
+  
+  # correlate species response and global MAT.
+  # too much autocorrelation in residuals of mean vs. MAT so use KDE optimum
+  # peLm <- lm(sp$pe ~ sampSame$m)
+  # acf(peLm$residuals)
+  sCor <- cor(sp$pe, sampSame$m, method='pear')
   
   # ages must start at 0
   sampSame$scaledT <- sp$scaledT <- 1:nrow(sp) -1
@@ -146,7 +158,8 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
   sampEvo <- row.names(modsSamp$modelFits)[sampMx]
   
-  out <- data.frame(sp=s, bestMod=modNm, weight=w, l=l, start=strt, samplingMod=sampEvo)
+  out <- data.frame(sp=s, r=sCor, bestMod=modNm, weight=w, 
+                    l=l, start=strt, samplingMod=sampEvo)
 #  out$params <- list(params)
   out
 }
@@ -155,6 +168,7 @@ mods4l <- lapply(longSpp, evoFit, dat=tsDf, sampDat=samp, spDat=spAttr, nmods = 
 mods4 <- do.call('rbind', mods4l)
 
 table(mods4$bestMod)
+summary(mods4$r)
 
 # Spp vs sampling evo mode ------------------------------------------------
 
@@ -248,6 +262,7 @@ for (i in 1:nlvl){
 }
 
 # export as compound plot
+# TODO use vjust argument to nudge labels down
 pg <- plot_grid(plotlist=plotL, nrow=2, 
                 labels=c('(a)','(b)','(c)','(d)'), label_size = 12)
 yGrob <- textGrob('Temperature at sample sites', 
