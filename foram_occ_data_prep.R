@@ -4,9 +4,6 @@ library(parallel)
 library(foreach)
 library(iterators)
 library(doParallel)
-library(phytools)
-library(paleoPhylo)
-library(ape)
 library(ggplot2)
 
 # Data import -------------------------------------------------------------
@@ -19,6 +16,9 @@ occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 
 # easier to work on scale of ka not ma
 occ$age <- occ$age*1000
+
+# typo
+occ$species <- gsub('Globototalia anfracta','Globorotalia anfracta', occ$species)
 
 # Extract core range-through data -----------------------------------------
 
@@ -99,7 +99,7 @@ bad <- c('-', '/', '*', 'rw?', '#0.0', '?1', 'p?')
 badBool <- occ$orig.abundance %in% bad
 occ <- occ[!badBool,]
 
-# There are ~150 original abundance codings that imply a species presence, but abundance is 0.
+# Some original abundance codings that imply a species presence, but abundance is 0.
 # Modify the abundance so that these records are not discarded.
 ok <- setdiff(nonNum, bad)
 okBool <- occ$orig.abundance %in% ok
@@ -133,16 +133,40 @@ abund <- dpthTbl$MaxAbund
 penult <- nchar(abund) - 1
 dpthTbl$MaxAbund <- substr(abund, 1, penult)
 dpthTbl$MaxAbund <- as.numeric(dpthTbl$MaxAbund)
+# add a category for depth reference
+dpthTbl$ref <- 'Rebotim et al. 2017'
+
+# Schiebel et al. 2004 also confirm that minuta is within top 60m
+minut <- which(dpthTbl$Species=='Globigerinita.minuta')
+dpthTbl$DepthHabitat[minut] <- 'Surface'
+
+# Specify depth range based on Retailleau et al. 2011
+uvula <- which(dpthTbl$Species=='Globigerinita.uvula')
+dpthTbl$DepthHabitat[uvula] <- 'Surface'
+dpthTbl$ALD[uvula] <- 26
+dpthTbl$ref[uvula] <- 'Retailleau et al. 2011'
+
+# Hull et al. did surveys of H digitata; 280-358 m
+hdig <- which(dpthTbl$Species=='Hastigerinella.digitata')
+dpthTbl$DepthHabitat[hdig] <- 'Subsurface'
+dpthTbl$ref[hdig] <- 'Hull et al. 2011'
+
+# Schiebel et al. sampled ALD of 60.5 m, but quite variable
+# Schmuker and Schiebel 2002 also got depth of 60-80 m
+# but Schiebel and Hemleben 2017 considered the species shallow
+anfrac <- which(dpthTbl$Species=='Dentigloborotalia.anfracta')
+dpthTbl$DepthHabitat[anfrac] <- 'Surface'
+dpthTbl$ref[anfrac] <- c('Schiebel et al. 2004, Rebotim et al. 2017')
 
 # Add G trilobus data from Loncaric et al. 2006
 trilobus <- c('Globigerinoides.trilobus',
-              NA,208,17.4,NA,7.0,NA,'Surface',NA)
+              NA,208,17.4,NA,7.0,NA,'Surface',NA,'Loncaric et al. 2006')
 dpthTbl <- rbind(dpthTbl,trilobus)
 
 # Add G (H) theyeri data from Schiebel et al. 2004
 # found only from 40-60 m, very rare
 theyeri <- c('Hirsutella.theyeri',
-             NA,0.2,50,NA,15,NA,'Surface',NA)
+             NA,0.2,50,NA,15,NA,'Surface',NA,'Schiebel et al. 2004')
 dpthTbl <- rbind(dpthTbl,theyeri)
 
 # Add depth ranges from Schiebel and Hemleben 2017
@@ -152,15 +176,16 @@ digitata <- grep('Beella.digitata',dpthTbl$Species)
 dpthTbl$DepthHabitat[digitata] <- 'Subsurface'
 dpthTbl$ALD[digitata] <- 150
 dpthTbl$VD[digitata] <- 75
+dpthTbl$ref[digitata] <- 'Schiebel and Hemleben 2017'
 
 # S dehiscens is sub-thermocline, subsurface
-dehiscens <- c('Sphaeroidinella.dehiscens',
-               NA,NA,150,NA,75,NA,'Subsurface',NA)
+dehiscens <- c('Sphaeroidinella.dehiscens',NA,NA,150,NA,75,NA,
+               'Subsurface',NA,'Schiebel and Hemleben 2017')
 
 # G ungulata has same distribution as G menardii; 
 # density up to 2 per cubic m
-ungulata <- c('Globorotalia.ungulata',
-         NA,NA,46.2,NA,25.2,NA,'Surface',NA)
+ungulata <- c('Globorotalia.ungulata',NA,NA,46.2,NA,25.2,NA,
+              'Surface',NA,'Schiebel and Hemleben 2017')
 dpthTbl <- rbind(dpthTbl, dehiscens, ungulata)
 
 # Add depth ranges from Watkins et al. 1996
@@ -174,29 +199,32 @@ dpthTbl$ALD[menardii] <- 46.2
 dpthTbl$VD[menardii] <- 25.2
 dpthTbl$MaxAbund[menardii] <- 51
 dpthTbl$DepthHabitat[menardii] <- 'Surface'
+dpthTbl$ref[menardii] <- 'Watkins et al. 1996'
 
 # G tumida ranges lives in upper 80m, ALD of 50 read off fig 4b
-tumida <- c('Globorotalia.tumida',
-            NA,30,50,NA,15,NA,'Surface',NA)
+tumida <- c('Globorotalia.tumida',NA,30,50,NA,15,NA,
+            'Surface',NA,'Watkins et al. 1996')
 
 # G conglobatus also lives in upper 80m, ALD of 50 (fig 5c)
-conglob <- c('Globigerinoides.conglobatus',
-             NA,3,50,NA,15,NA,'Surface',NA)
+conglob <- c('Globigerinoides.conglobatus',NA,3,50,NA,15,NA,
+             'Surface',NA,'Watkins et al. 1996')
 
 # G hexagonus is sub-thermocline, 100-200m
-hexag <- c('Globorotaloides.hexagonus',
-           NA,2,150,NA,75,NA,'Subsurface',NA)
+hexag <- c('Globorotaloides.hexagonus',NA,2,150,NA,75,NA,
+           'Subsurface',NA,'Watkins et al. 1996')
 
-# G adamsi is sub-termocline, 100-200 m
+# G adamsi is sub-thermocline, 100-200 m
 # Schiebel et al. 2004 sampled adamsi mainly 40-100m,
 # but didn't sample below 100 m
-adamsi <- c('Globigerinella.adamsi',
-            NA,2,125,NA,75,NA,'Surface.subsurface',NA)
+adamsi <- c('Globigerinella.adamsi',NA,2,125,NA,75,NA,
+            'Surface.subsurface',NA,
+            'Watkins et al. 1996, Schiebel et al. 2004')
 
 # G conglomerata is subsurface, 60-100m, ALD ca 80 (fig 4a)
 # Schiebel et al. 2004: G conglomerata is surface, ALD=42.5, VD=30.8
 glom <- c('Globoquadrina.conglomerata',
-          NA,2.4,42.5,NA,30.8,NA,'Surface.subsurface',NA)
+          NA,2.4,42.5,NA,30.8,NA,'Surface.subsurface',NA,
+          'Watkins et al. 1996, Schiebel et al. 2004')
 
 dpthTbl <- rbind(dpthTbl,tumida,conglob,hexag,adamsi,glom)
 
@@ -205,8 +233,11 @@ dpthTbl <- rbind(dpthTbl,tumida,conglob,hexag,adamsi,glom)
 # but Rebotim et al (2017) and Schiebel (2017) consider it shallow.
 crass <- which(dpthTbl$Species=='Globorotalia.crassaformis')
 dpthTbl$DepthHabitat[crass] <- 'Surface.subsurface'
+dpthTbl$ref[crass] <- 
+  c('Ezard et al. 2015, Rebotim et al. 2017, Schiebel 2017, Meilland et al. 2019')
 
 # Synonymize according to Microtax for congruence with occurrence database
+dpthTbl$Species <- gsub('Dentigloborotalia.anfracta','Globorotalia.anfracta',dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.scitula','Hirsutella.scitula',dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.inflata','Globoconella.inflata',dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.hirsuta','Hirsutella.hirsuta',dpthTbl$Species)
@@ -219,17 +250,19 @@ dpthTbl$Species <- gsub('Globigerinoides.tenellus','Globoturborotalita.tenella',
 dpthTbl$Species <- gsub('Globorotalia.truncatulinoides','Truncorotalia.truncatulinoides',
                         dpthTbl$Species)
 
-# Add depth data to sp-level dataset (except for 1st column, which would duplicate sp names)
-spp <- sppDat$species
-spp <- gsub(' ','.',spp)
-wOccs <- dpthTbl$Species %in% spp
+# Add depth data to sp-level dataset (except for 1st column, which would duplicate sp names).
+# There are species with occurrences for which the habitat is still NA in this object, 
+# but these species are omitted in subsequent scripts due to insufficient sample size.
+sppDot <- sppDat$species
+sppDot <- gsub(' ','.',sppDot)
+wOccs <- dpthTbl$Species %in% sppDot
 dpthTbl <- dpthTbl[wOccs,]
 newCols <- colnames(dpthTbl)[-1]
 sppDat[,newCols] <- NA
-spPos <- match(dpthTbl$Species, spp)
+spPos <- match(dpthTbl$Species, sppDot)
 sppDat[spPos,newCols] <- dpthTbl[,-1]
 spDatNm <- paste0('Data/foram_spp_data_',day,'.csv')
-#write.csv(sppDat, spDatNm, row.names = FALSE)
+# write.csv(sppDat, spDatNm, row.names = FALSE)
 
 # cut down file size
 irrel <- c('site','hole','core','section','sample.top','sample.type',
@@ -294,33 +327,6 @@ stageDfList <- foreach(bin=bins$mid) %dopar%
 stopImplicitCluster()
 
 df <- do.call('rbind', stageDfList)
-
-# Phylo data compatability ------------------------------------------------
-
-# Limit analysis to species included in tree from Aze et al. 2011
-trRaw <- read.csv('Data/Aze_et_al_2011_bifurcating_tree_data.csv', stringsAsFactors=FALSE)
-trRaw$Species.name <- gsub('Globigerinoides sacculifer', 'Trilobatus sacculifer', trRaw$Species.name)
-trRaw$Species.name <- gsub('Globigerinoides trilobus', 'Trilobatus trilobus', trRaw$Species.name)
-tr_paleo <- with(trRaw, 
-                 as.paleoPhylo(Species.code, Ancestor.code, Start.date, End.date)
-)
-tr <- buildApe(tr_paleo)
-sppCodes <- tr$tip.label
-rowOrdr <- match(sppCodes, trRaw$Species.code)
-tr$tip.label <- trRaw$Species.name[rowOrdr]
-
-# some species are not present in the phylogeny, mostly because microporiferate
-sppAll <- unique(df$species)
-lostSpp <- setdiff(sppAll, tr$tip.label)
-
-# Beella megastoma is arguably the same species as B. digitata,
-# and Truncorotalia crassula is arguably senior synonym to crassaformis
-# (Schiebel and Hemleben 2017). The depth ranges for both are unknown.
-lostSpp <- c(lostSpp, 'Beella megastoma', 'Truncorotalia crassula')
-
-spp <- setdiff(sppAll, lostSpp)
-rows2toss <- ! df$species %in% spp
-df <- df[!rows2toss,]
 row.names(df) <- as.character(1:nrow(df))
 
 # Combine enviro and spp data ---------------------------------------------
@@ -335,19 +341,20 @@ llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 # and the values are based on the mean Average Living Depth of species in the dataset.
 dpths <- c(1,4,6,8)
 # Compare with the Average Living Depth of species in the dataset:
-sppDat <- read.csv('Data/foram_spp_data_20-03-26.csv', stringsAsFactors=FALSE)
-sameSpp <- sppDat$species %in% spp
-sppDat <- sppDat[sameSpp,]
+spp <- unique(df$species) 
+row.names(sppDat) <- sppDat$species
+sppDat <- sppDat[spp,]
+sppDat$ALD <- as.numeric(sppDat$ALD)
 zones <- unique(sppDat$DepthHabitat)
 for (z in zones){
   zRows <- which(sppDat$DepthHabitat==z)
-  avg <- mean(sppDat$ALD[zRows])
+  avg <- mean(sppDat$ALD[zRows],na.rm=T)
   avg <- round(avg)
   print(paste(z, avg))
 }
-# [1] "Subsurface 164"
-# [1] "Surface.subsurface 89"
-# [1] "Surface 49"
+# [1] "Subsurface 174"
+# [1] "Surface.subsurface 88"
+# [1] "Surface 42"
 
 source('raster_brick_import_fcn.R')
 
@@ -416,7 +423,7 @@ sampEnv <- function(b){
     nmOld <- envNmShort[i]
     nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
     colnames(envVals) <- nmNew
-    sampled <- cbind(b, slc$cell, envVals)
+    sampled <- cbind(b, cell=slc$cell, envVals)
     
     # interpolate missing values from the adjacent 9 cells
     naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
@@ -440,5 +447,5 @@ naSampRows <- apply(samp[,allEnvNm], 1, function(r)
 )
 samp <- samp[!naSampRows,]
 
-sampNm <- paste0('Data/samp_uniq_occs_latlong_8ka_trunc_',day,'.csv')
+sampNm <- paste0('Data/samp_uniq_occs_latlong_8ka_',day,'.csv')
 write.csv(samp, sampNm, row.names = FALSE)
