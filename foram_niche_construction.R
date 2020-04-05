@@ -14,11 +14,11 @@ day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 source('GSA_custom_ecospat_fcns.R')
 source('species_kde_buildr.R')
 
-df <- read.csv('Data/foram_uniq_occs_latlong_8ka_20-03-27.csv', 
+df <- read.csv('Data/foram_uniq_occs_latlong_8ka_20-04-05.csv', 
                stringsAsFactors = FALSE)
-samp <- read.csv('Data/samp_uniq_occs_latlong_8ka_20-03-27.csv',
+samp <- read.csv('Data/samp_uniq_occs_latlong_8ka_20-04-05.csv',
                  stringsAsFactors = FALSE)
-spAttr <- read.csv('Data/foram_spp_data_20-03-26.csv',
+spAttr <- read.csv('Data/foram_spp_data_20-04-05.csv',
                    stringsAsFactors = FALSE)
 
 envNm <- 'temp_ym'
@@ -67,6 +67,7 @@ truncatr <- function(e){
   sampSmry <- sapply(bins, minmax, df=samp, env=e)
   uppr <- min(sampSmry[2,])
   lwr <- max(sampSmry[1,])
+  print(uppr)
   
   # Consider only the species within the focal habitat zone
   zone <- e2zone(e)
@@ -108,13 +109,15 @@ truncatr <- function(e){
   tossRows <- unlist(tossRowsL)
   trunc <- trunc[-tossRows,]
   
-  # Also re-check for per-species continuity through time 
-  # (at least 7 successive steps of 8ka i.e. 6 boundary crossings)
+  # Check that the species is sampled consecutively at least once 
   keepSpp <- character()
   spp <- unique(trunc$species)
   binL <- bins[2] - bins[1]
-  enuf <- rep(binL, 6)
-  enufTxt <- paste0(enuf, collapse='')
+  enufTxt <- paste(binL)
+  # Alternatively, as for time series analysis, ensure samplng
+  # in at least 7 successive steps i.e. 6 boundary crossings
+    #  enuf <- rep(binL, 6)
+    # enufTxt <- paste0(enuf, collapse='')
   for (s in spp){
     spBool <- trunc$species==s
     spDf <- trunc[spBool,]
@@ -144,6 +147,12 @@ names(truncEnv) <- allEnvNm
 truncNm <- paste0('Data/sampled_',envNm,'_truncated_by_depth_',day,'.rds')
 saveRDS(truncEnv, truncNm)
 
+# maximum temperature cutoff for each depth
+# [1] 27.05351
+# [1] 26.93761
+# [1] 25.91999
+# [1] 23.79145
+
 # KDE niche summary -------------------------------------------------------
 
 # for the most recent time bin, it's not possible to calculate overlap
@@ -169,14 +178,14 @@ stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
 
-# remove NA rows (if a species is not sampled in the focal bin)
+ # remove NA rows (if a species is not sampled in the focal bin)
 nas <- is.na(kdeSum$bin)
 kdeSum <- kdeSum[!nas,]
 naSS <- is.na(kdeSumSS$bin)
-kdesumSS <- kdeSumSS[!naSS,]
+kdeSumSS <- kdeSumSS[!naSS,]
 
 # Non-KDE niche summary ---------------------------------------------------
- 
+
 # Need mean, variance, sample size, & age of trait values for each sp & bin
 sumup <- function(bin, s, dat, binCol, sCol, traitCol){
   slcRows <- which(dat$sp[,binCol] == bin & dat$sp[,sCol] == s)
