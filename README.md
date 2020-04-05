@@ -3,7 +3,9 @@ Essential files, in run order:
 * BRIDGE GCM data prep
 * foram occ data prep
 * foram niche construction
+* analysis time series
 * analysis niches vs climate
+* analysis PGLS
 
 These rely on several functions:
 * raster brick import fcn
