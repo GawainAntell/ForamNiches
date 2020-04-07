@@ -6,7 +6,7 @@ library(gridExtra)
 library(tidyr)
 
 # set whether to run analyses on surface-level or in-habitat niches
-ss <- TRUE
+ss <- FALSE
 
 # Data prep ---------------------------------------------------------------
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
@@ -14,11 +14,11 @@ day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 # foram data
 spAttr <- read.csv('Data/foram_spp_data_20-03-26.csv', stringsAsFactors=FALSE)
 if (ss){
-  df <- read.csv('Data/foram_niche_sumry_metrics_0m_20-03-29.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/foram_niche_sumry_metrics_0m_20-04-05.csv', stringsAsFactors=FALSE)
   nas <- is.na(df$bin)
   df <- df[!nas,]
 } else {
-  df <- read.csv('Data/foram_niche_sumry_metrics_20-03-29.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/foram_niche_sumry_metrics_20-04-05.csv', stringsAsFactors=FALSE)
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -28,7 +28,7 @@ nspp <- length(spp)
 binL <- bins[1] - bins[2]
 
 # standardized sampling universe (MAT at range-through core sites) at each of 4 depths
-samp <- readRDS('Data/sampled_temp_ym_bin_summary_by_depth_20-04-01.rds')
+samp <- readRDS('Data/sampled_temp_ym_bin_summary_by_depth_20-04-05.rds')
 envNm <- 'temp_ym'
 
 # Deal with incomplete sp ts ----------------------------------------------
@@ -206,18 +206,25 @@ dev.off()
 
 # Missing sp-bin combinations have already been removed from the df object.
 # Add them back in so that the time series are plotted with gaps.
-
 combos <- expand.grid(spp, bins)
 colnames(combos) <- c('sp','bin')
 df <- merge(combos, df, all.x=TRUE, by=c('sp','bin'))
-
 spSort <- sort(spp)
 df$sp <- factor(df$sp, levels=spSort)
+
+# Don't plot the species with too short of time series
+rare <- vector()
+for (s in spp){
+  hits <- grep(s, tsDf$sp)
+  if (length(hits)==0) rare <- c(rare, s)
+}
+plotBool <- df$sp %in% setdiff(spp, rare)
+plotDf <- df[plotBool,]
+
 xtick <- paste(seq(600,0,by=-200))
 xbreak <- seq(-600,0,by=200)
-
 tsPlot <- 
-  ggplot(data=df)+
+  ggplot(data=plotDf)+
   theme_bw() +
   scale_y_continuous(name='Mean annual temperature at occupied sites') +
   scale_x_continuous(name='Time (Ka)', expand=c(0.01,0),
@@ -232,7 +239,7 @@ if (ss){
 } else {
   tsNm <- paste0('Figs/species_time_series_', day, '.pdf')
 }
-pdf(tsNm, width=8, height=8)
+pdf(tsNm, width=7.5, height=8)
 print(tsPlot)
 dev.off()
 
@@ -255,9 +262,8 @@ for (i in 1:nlvl){
 }
 
 # export as compound plot
-# TODO use vjust argument to nudge labels down
-pg <- plot_grid(plotlist=plotL, nrow=2, 
-                labels=c('(a)','(b)','(c)','(d)'), label_size = 12)
+pg <- plot_grid(plotlist=plotL, nrow=2, labels='AUTO', 
+                label_size = 14, hjust= -0.7) 
 yGrob <- textGrob('Temperature at sample sites', 
                    gp=gpar(fontface="bold"), rot=90)
 xGrob <- textGrob('Time (Ka)', 
@@ -277,14 +283,17 @@ mods4$sp <- gsub('Globoturborotalita rubescens6','Globoturborotalita rbs6',
 mods4$seq <- ''
 for (i in 1:nrow(mods4)){
   binom <- mods4$sp[i]
-  sNm <- strsplit(binom, ' ')[[1]][2]
-  tri <- substr(sNm, 1, 3)
+  nmVect <- strsplit(binom, ' ')[[1]]
+  abrv <- paste(substr(nmVect[1], 1, 2), 
+                 substr(nmVect[2], 1, 3), sep='.')
   # if the species already has sequences, add a distinct suffix
-  nrep <- length(grep(tri, mods4$seq))
-  triUniq <- paste0(tri, nrep+1)
-  mods4$seq[i] <- triUniq
+  nrep <- length(grep(abrv, mods4$seq))
+  abrvUniq <- paste0(abrv, nrep+1)
+  mods4$seq[i] <- abrvUniq
 }
 
+abrvOrdr <- order(mods4$seq)
+mods4 <- mods4[abrvOrdr,]
 modLong <- pivot_longer(mods4, cols=evoModes, names_to='model', values_to='weight')
 modLong$model <- factor(modLong$model, levels=rev(evoModes))
 modLong$seq <- factor(modLong$seq, levels=rev(unique(modLong$seq)))
@@ -298,13 +307,18 @@ bars <-
   geom_bar(data=modLong, aes(x=seq, y=weight, fill=model), 
            position='fill', stat='identity', width=0.75) +
   scale_x_discrete(name='Species sequence') +
-  scale_y_continuous(name='AIC weight', expand = c(0,0), limits=c(0,1.2),
+  scale_y_continuous(name='Model support (AIC weight)        ', 
+                     expand = c(0,0), limits=c(0,1.2),
                      breaks = seq(0,1,by=0.25)) +
   theme(legend.position = 'top',
         axis.text.x = element_text(angle=90, vjust=0.5, hjust=1),
         panel.grid = element_blank()) +
-  scale_colour_manual(name='', values=colr, aesthetics='fill')
-bars <- bars +
+  scale_colour_manual(name=element_blank(), values=colr, 
+                      aesthetics='fill', limits=evoModes,
+                      labels=c('Strict stasis','Stasis','Random walk','Directional walk')) +
+  guides(fill=guide_legend(nrow=2))
+barsFlip <- 
+  bars +
   geom_text(aes(x=seq, y=1.1, label=l), data=mods4, hjust=1, size=3.2) +
   coord_flip()
 
@@ -313,6 +327,7 @@ if (ss){
 } else {
   barNm <- paste0('Figs/evo_model_support_barplot_hab_',day,'.pdf')
 }
-pdf(barNm, width=3.4252, height=6)
-bars
+# the column width is 3.4252 in, but the exported plot has white space to trim
+pdf(barNm, width=3.4252+0.3, height=6)
+barsFlip
 dev.off()
