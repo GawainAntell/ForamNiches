@@ -67,7 +67,8 @@ truncatr <- function(e){
   sampSmry <- sapply(bins, minmax, df=samp, env=e)
   uppr <- min(sampSmry[2,])
   lwr <- max(sampSmry[1,])
-  print(uppr)
+  out <- c(round(uppr,1), round(lwr, 1))
+  print(out)
   
   # Consider only the species within the focal habitat zone
   zone <- e2zone(e)
@@ -144,14 +145,45 @@ truncatr <- function(e){
 
 truncEnv <- lapply(allEnvNm, truncatr)
 names(truncEnv) <- allEnvNm
+nrow(truncEnv$temp_ym_0m$sp)
 truncNm <- paste0('Data/sampled_',envNm,'_truncated_by_depth_',day,'.rds')
 saveRDS(truncEnv, truncNm)
 
 # maximum temperature cutoff for each depth
-# [1] 27.05351
-# [1] 26.93761
-# [1] 25.91999
-# [1] 23.79145
+# > [1] 27.1 -1.4
+# > [1] 26.9 -1.3
+# > [1] 25.9 -0.6
+# > [1] 23.8  0.8
+
+# Evaluate degree of truncation -------------------------------------------
+
+df$trunc <- 'in range'
+tooBig <- which(df$temp_ym_0m > 27.1)
+tooSmol <- which(df$temp_ym_0m < -1.4)
+df$trunc[tooBig] <- 'high'
+df$trunc[tooSmol] <- 'low'
+
+# omit the most recent 2 time bins because the data are too numerous
+# too plot on the same scale
+mdrnBool <- df$bin %in% bins[1:2]
+mdrn <- df[mdrnBool,]
+table(mdrn$bin)
+old <- df[!mdrnBool,]
+old$trunc <- factor(old$trunc, levels = c('high','low','in range'))
+bars <- ggplot(data = old, aes(fill = trunc, x= - bin)) + 
+  scale_x_continuous(name='Time (Ka)', labels = c(600, 400, 200),
+                     breaks = c(-600, -400, -200), expand = c(0.01, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 580)) +
+  theme_bw() +
+  geom_bar(position="stack", width = 5) +
+  scale_fill_manual(name='MAT value in relation to cutoffs', 
+                    values=c('plum','gold','grey20')) +
+  theme(legend.position = 'top')
+
+barNm <- paste0('Figs/truncated-data-sample-size_bars_',day,'.pdf')
+pdf(barNm, width=6, height=4)
+print(bars)
+dev.off()
 
 # KDE niche summary -------------------------------------------------------
 
