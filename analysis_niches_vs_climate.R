@@ -26,7 +26,6 @@ nbin <- length(bins)
 spp <- unique(df$sp)
 nspp <- length(spp)
 binL <- bins[1] - bins[2]
-nCore <- detectCores() - 1
 
 # standardized sampling universe (MAT at range-through core sites) at each of 4 depths
 truncEnv <- readRDS('Data/sampled_temp_ym_truncated_by_depth_20-04-05.rds')
@@ -138,6 +137,20 @@ for (r in 1:nrow(ints)){
     c(minAge, maxAge, range(globMean[inInt]))
 }
 
+ints$minAge[nrow(ints)] <- NA
+ints$maxAge[1] <- NA
+
+# table of glacial max and interglacial peaks
+
+# Lisiecki and Raymo 2005 ages of interglacial onset:
+ig <- c(14, 130, 243, 337, 424, 533, 621)
+out <- data.frame(glacialMax=ints$minAge, igPeak=ints$maxAge, igOnset=ig)
+outx <- xtable(out, align=rep('r', ncol(out)+1), digits=0)
+tblNm <- paste0('Figs/glacial-interglacial-ages_',day,'.tex')
+if (ss){
+  print(outx, file=tblNm, include.rownames=FALSE)
+}
+
 # plot time series of global MAT
 globDat <- data.frame(bins, globMean) # ,sampAvg)
 globTseries <- ggplot() +
@@ -156,27 +169,16 @@ globTseries <- ggplot() +
   geom_point(data = ints, aes(x = -maxAge, y = maxT), 
              colour = 'firebrick2', size = 1.5)
 
-# table of glacial max and interglacial peaks
-
-# Lisiecki and Raymo 2005 ages of interglacial onset:
-ig <- c(14, 130, 243, 337, 424, 533, 621)
-out <- data.frame(glacialMax=ints$minAge, igPeak=ints$maxAge, igOnset=ig)
-outx <- xtable(out, align=rep('r', ncol(out)+1), digits=0)
-tblNm <- paste0('Figs/glacial-interglacial-ages_',day,'.tex')
-if (ss){
-  print(outx, file=tblNm, include.rownames=FALSE)
-}
-
 # Extreme comparisons -----------------------------------------------------
 
 # prepare a framework of every pairwise comparison to compute
 # (every warm vs. cold, warm vs. warm, and cold vs. cold interval)
-wc <- expand.grid(X1=ints$minAge, X2=ints$maxAge)
+wc <- expand.grid(X1=ints$minAge[-nrow(ints)], X2=ints$maxAge[-1])
 wc$type <- 'cold-warm'
-cc <- combn(ints$minAge, 2)
+cc <- combn(ints$minAge[-nrow(ints)], 2)
 cc <- data.frame(t(cc))
 cc$type <- 'cold-cold'
-ww <- combn(ints$maxAge, 2)
+ww <- combn(ints$maxAge[-1], 2)
 ww <- data.frame(t(ww))
 ww$type <- 'warm-warm'
 intPairs <- rbind(wc, cc, ww) 
@@ -213,6 +215,7 @@ for (i in 1:nrow(intPairs)){
 # source('species_kde_buildr.R')
 
 # warning - this could take 1 - 2 hours
+# nCore <- detectCores() - 1
 # pkg <- c('pracma','GoFKernel')
 # pt1 <- proc.time()
 # registerDoParallel(nCore)
