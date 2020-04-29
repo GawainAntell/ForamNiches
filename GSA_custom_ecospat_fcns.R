@@ -20,7 +20,9 @@ density.reflected <- function (x, lower = -Inf, upper = Inf, weights = NULL, ...
   x <- x[mantener]
   if (upper < max(x)) 
     warning("There are values in the sample higher than the upper limit")
-  if (lower > min(x)) 
+  # GSA edit: rounding problems occur for foram data that make min values not seem equal
+  if (round(lower,6) > min(x)) 
+  # if (lower > min(x))
     warning("There are values in the sample smaller than the lower limit")
   if (sd(x) == 0) {
     dx <- density(c(x, x[1] + .Machine$double.eps, x[1] - 
