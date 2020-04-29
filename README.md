@@ -5,11 +5,12 @@ Essential files, in run order:
 * foram niche construction
 * analysis time series
 * analysis niches vs climate
-* analysis PGLS
+* analysis phylo eco
+* exploratory plot all spp KDEs (supplemental figures)
 
 These rely on several functions:
 * raster brick import fcn
 * GSA custom ecospat fcns
 * species kde buildr
 
-All other .R files are supplemental, and may be too outdated for compatability with current data files.
+All other .R files are extraneous and may be too outdated for compatability with current data files.
