@@ -12,11 +12,9 @@ ss <- FALSE
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
 # foram data
-spAttr <- read.csv('Data/foram_spp_data_20-03-26.csv', stringsAsFactors=FALSE)
+spAttr <- read.csv('Data/foram_spp_data_20-04-05.csv', stringsAsFactors=FALSE)
 if (ss){
   df <- read.csv('Data/foram_niche_sumry_metrics_0m_20-04-05.csv', stringsAsFactors=FALSE)
-  nas <- is.na(df$bin)
-  df <- df[!nas,]
 } else {
   df <- read.csv('Data/foram_niche_sumry_metrics_20-04-05.csv', stringsAsFactors=FALSE)
 }
