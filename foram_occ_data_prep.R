@@ -14,54 +14,79 @@ day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 # Read in occurrence data
 occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 
-# easier to work on scale of ka not ma
+# easier to work on scale of Ka not Ma
 occ$age <- occ$age*1000
 
 # typo
 occ$species <- gsub('Globototalia anfracta','Globorotalia anfracta', occ$species)
 
-# Extract core range-through data -----------------------------------------
+# save names of palaeocoordinate columns to call later
+coordCols <- c('pal.long','pal.lat')
 
 # No breeding populations at shallow depths, so any occurrences there are suspect
 shall <- which(occ$water.depth < 100)
 occ <- occ[-shall,]
 
+# Clean core IDs ----------------------------------------------------------
+
 # There are sometimes 2 or 3 coreID's per hole, with .a/.b/.c suffix,
 # seemingly because of differences in data entry rules.
 # There are also typos of dashes and underscores mixed up.
-occ$coreID <- gsub('-','_',occ$coreID)
-occ$coreUniq <- gsub('181_1119B','181_1119',occ$coreID)
+occ$coreUniq <- occ$coreID
+occ$coreUniq <- gsub('-','_',occ$coreUniq)
+occ$coreUniq <- gsub('181_1119B', '181_1119', occ$coreUniq)
 rmSuffix <- function(txt){
   strsplit(txt, '[.]')[[1]][1]
 }
 occ$coreUniq <- sapply(occ$coreUniq, rmSuffix)
-corsUniq <- unique(occ$coreUniq)
 
 # Note that 'core' is not a unique identifier, and many 'hole' values are NA.
 # The coreID is nearly unique, but there are mistakes.
 # Make sure that the coordinates match or are very close (< 100m)
 # and if not, then create a new coreID.
-problm <- data.frame()
-for (cr in corsUniq){
-  crRows <- which(occ$coreUniq==cr)
-  crDf <- occ[crRows,]
-  mdrnCoords <- c('longitude','latitude')
-  dupes <- duplicated(crDf[,mdrnCoords])
-  uniqCrs <- crDf[!dupes,]
-  if (nrow(uniqCrs) > 1){
-    crPts <- SpatialPoints(uniqCrs[,mdrnCoords])
-    gcdists <- spDists(crPts)
-    far <- any(gcdists > 0.1)
-    if (far){
-      problm <- rbind(problm, uniqCrs)
-    }
-  }
-}
-# write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
-badID <- unique(problm$coreUniq)
 
-cors2use <- ! corsUniq %in% badID
-corsUniqCln <- corsUniq[cors2use]
+# export a spreadsheet of problem IDs to fix in original database
+# corsUniq <- unique(occ$coreUniq)
+# problm <- data.frame()
+# for (cr in corsUniq){
+#   crRows <- which(occ$coreUniq==cr)
+#   crDf <- occ[crRows,]
+#   mdrnCoords <- c('longitude','latitude')
+#   dupes <- duplicated(crDf[,mdrnCoords])
+#   uniqCrs <- crDf[!dupes,]
+#   if (nrow(uniqCrs) > 1){
+#     crPts <- SpatialPoints(uniqCrs[,mdrnCoords])
+#     gcdists <- spDists(crPts)
+#     far <- any(gcdists > 0.1)
+#     if (far){
+#       problm <- rbind(problm, uniqCrs)
+#     }
+#   }
+# }
+# # write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
+# badID <- unique(problm$coreUniq)
+
+# Cores RC8C80, RC8C81, RC8C82, RC8C83, RC9C98 and RC9C99
+# each contain duplicate sets of entries, with different coordinates 
+# for each set. It's unclear which is correct.
+problm1 <- occ$coreUniq %in% 
+  c('RC8C80','RC8C81','RC8C82','RC8C83','RC9C98','RC9C99')
+occ <- occ[!problm1,]
+
+# Cores NA87_22 and NA87_22.a are the same, but the coordinates 
+# differ by 0.1 degrees. Use the same average position for both.
+problm2 <- which(occ$coreID=='NA87-22')
+problm3 <- which(occ$coreID=='NA87-22.a')
+examp1 <- occ[problm2[1], coordCols]
+examp2 <- occ[problm3[1], coordCols]
+newLong <- mean(c(examp1$pal.long, examp2$pal.long))
+newLat <- mean(c(examp1$pal.lat, examp2$pal.lat))
+occ$pal.long[c(problm2, problm3)] <- newLong
+occ$pal.lat[ c(problm2, problm3)] <- newLat
+
+# Extract core range-through data -----------------------------------------
+
+corsUniqCln <- unique(occ$coreUniq)
 corInfo <- function(cr){
   crRows <- which(occ$coreUniq==cr)
   crDf <- occ[crRows,]
@@ -85,27 +110,29 @@ corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
 
 # Any original abundance of NA is suspect. Surprisingly, the abundance
 # for some of these records is > 0; those records aren't reliable.
-naAbund <- is.na(occ$orig.abundance)
+naAbund <- which(is.na(occ$orig.abundance) & occ$abundance > 0)
 # summary(occ$abundance[naAbund])
-occ <- occ[!naAbund,]
+occ <- occ[-naAbund,]
 
+# Some original abundance codings are ambiguous
 uniqAbund <- unique(occ$orig.abundance)
 numAbund <- suppressWarnings(as.numeric(uniqAbund))
 nonNum <- uniqAbund[is.na(numAbund)]
 nonNum
-
-# Some original abundance codings are ambiguous. Data in these categories should be omitted:
+# Data in these categories should be omitted:
 bad <- c('-', '/', '*', 'rw?', '#0.0', '?1', 'p?')
 badBool <- occ$orig.abundance %in% bad
 occ <- occ[!badBool,]
 
-# Some original abundance codings that imply a species presence, but abundance is 0.
+# Some original abundance codings imply a species presence, but abundance is 0.
 # Modify the abundance so that these records are not discarded.
-ok <- setdiff(nonNum, bad)
-okBool <- occ$orig.abundance %in% ok
-occ$abundance[okBool] <- 1
+ok <- setdiff(nonNum, c(bad, NA))
+not0 <- which(occ$orig.abundance %in% ok & occ$abundance==0)
+occ$abundance[not0] <- 1
 
 # Lastly, there is the case that abundance is recorded as 0; these are presumably absences.
+# Absences were already used in the calculation of the sampling universe
+# (core range-through data), so omit them now. Analyses will be on presence data.
 zeroBool <- occ$abundance==0
 occ <- occ[!zeroBool,]
 
@@ -116,8 +143,8 @@ tooYng <- which(occ$earliest < .8)
 occ <- occ[-tooYng,]
 
 # excise sp traits into a separate, sp-level file to call later in analysis
-traits <- c('morphDes','spinose','structure','aperture','latest','earliest',
-            'mph','mphRef','eco','ecoRef','geo','geoRef',
+traits <- c('morphDes','spinose','Macro.micro','structure','aperture',
+            'latest','earliest','mph','mphRef','eco','ecoRef','geo','geoRef',
             'log.area','Approximate.diameter') # 'Average.Area.microm2',
 sppDat <- occ[,c('species',traits)]
 dupes <- duplicated(sppDat$species)
@@ -237,16 +264,26 @@ dpthTbl$ref[crass] <-
   c('Ezard et al. 2015, Rebotim et al. 2017, Schiebel 2017, Meilland et al. 2019')
 
 # Synonymize according to Microtax for congruence with occurrence database
-dpthTbl$Species <- gsub('Dentigloborotalia.anfracta','Globorotalia.anfracta',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globorotalia.scitula','Hirsutella.scitula',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globorotalia.inflata','Globoconella.inflata',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globorotalia.hirsuta','Hirsutella.hirsuta',dpthTbl$Species)
-dpthTbl$Species <- gsub('Berggrenia.pumillio','Berggrenia.pumilio',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globorotalia.crassaformis','Truncorotalia.crassaformis',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globorotalia.menardii','Menardella.menardii',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globigerinoides.trilobus','Trilobatus.trilobus',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globigerinoides.ruber.white','Globigerinoides.ruber',dpthTbl$Species)
-dpthTbl$Species <- gsub('Globigerinoides.tenellus','Globoturborotalita.tenella',dpthTbl$Species)
+dpthTbl$Species <- gsub('Dentigloborotalia.anfracta','Globorotalia.anfracta',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globorotalia.scitula','Hirsutella.scitula',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globorotalia.inflata','Globoconella.inflata',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globorotalia.hirsuta','Hirsutella.hirsuta',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Berggrenia.pumillio','Berggrenia.pumilio',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globorotalia.crassaformis','Truncorotalia.crassaformis',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globorotalia.menardii','Menardella.menardii',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globigerinoides.trilobus','Trilobatus.trilobus',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globigerinoides.ruber.white','Globigerinoides.ruber',
+                        dpthTbl$Species)
+dpthTbl$Species <- gsub('Globigerinoides.tenellus','Globoturborotalita.tenella',
+                        dpthTbl$Species)
 dpthTbl$Species <- gsub('Globorotalia.truncatulinoides','Truncorotalia.truncatulinoides',
                         dpthTbl$Species)
 
@@ -265,8 +302,10 @@ spDatNm <- paste0('Data/foram_spp_data_',day,'.csv')
 # write.csv(sppDat, spDatNm, row.names = FALSE)
 
 # cut down file size
-irrel <- c('site','hole','core','section','sample.top','sample.type',
-           'preservation','processing','Macro.micro')
+irrel <- c('orig.species','abundance','orig.abundance','abun.units',
+           'site','hole','core','section','sample.top','sample.type',
+           'total.IDd','preservation','processing','Comments',
+           'Average.Area..µm2.','log.area','Approximate.diameter')
 cols2toss <- colnames(occ) %in% c(traits, irrel)
 occ <- occ[,!cols2toss]
 
@@ -294,8 +333,8 @@ for (r in 1:nrow(occ)){
 }
 
 # Rasterize to the resolution of GCM data
-palCoords <- occ[,c('pal.long','pal.lat')]
-pts <- SpatialPointsDataFrame(palCoords, data = occ, proj4string = CRS(llPrj))
+pts <- SpatialPointsDataFrame(occ[, coordCols], 
+                              data = occ, proj4string = CRS(llPrj))
 occ$cell_number <- cellFromXY(rEmpt, pts) 
 occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
 
