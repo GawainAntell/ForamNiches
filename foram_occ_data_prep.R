@@ -63,7 +63,7 @@ occ$coreUniq <- sapply(occ$coreUniq, rmSuffix)
 #     }
 #   }
 # }
-# # write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
+# write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
 # badID <- unique(problm$coreUniq)
 
 # Cores RC8C80, RC8C81, RC8C82, RC8C83, RC9C98 and RC9C99
@@ -104,7 +104,7 @@ corPts <- SpatialPoints(coreAtts[,c('long','lat')], CRS(llPrj))
 coreAtts$cell <- cellFromXY(rEmpt, corPts) 
 
 corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
-#write.csv(coreAtts, corNm)
+write.csv(coreAtts, corNm)
 
 # Absence data --------------------------------------------------------------
 
@@ -298,8 +298,8 @@ newCols <- colnames(dpthTbl)[-1]
 sppDat[,newCols] <- NA
 spPos <- match(dpthTbl$Species, sppDot)
 sppDat[spPos,newCols] <- dpthTbl[,-1]
-spDatNm <- paste0('Data/foram_spp_data_',day,'.csv')
-# write.csv(sppDat, spDatNm, row.names = FALSE)
+spDatNm <- paste0('Data/foram_spp_data_', day, '.csv')
+write.csv(sppDat, spDatNm, row.names = FALSE)
 
 # cut down file size
 irrel <- c('orig.species','abundance','orig.abundance','abun.units',
@@ -344,12 +344,8 @@ occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
 # omit duplicate cell-species combinations
 slcSpSmry <- function(dat, sp){
   spSlc <- dat[dat$species==sp,] 
-  uniqRecord <- function(x){ 
-    first <- which(spSlc$cell_number==x)[1]
-    spSlc[first,] 
-  }
-  tempList <- lapply(unique(spSlc$cell_number), uniqRecord)
-  do.call('rbind', tempList)
+  dupes <- duplicated(spSlc$cell_number)
+  spSlc[!dupes,]
 }
 
 # apply slcSpSmry over species in a stage
@@ -373,12 +369,10 @@ row.names(df) <- as.character(1:nrow(df))
 envNm <- 'ann_temp_ym_dpth'
 envNmShort <-  paste(strsplit(envNm,'_')[[1]][2:3], collapse='_')
 
-llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-
-# Extract at each of 4 depths: 0, 40, 78, 164 m
+# Extract at each of 4 AOGCM depths: 0, 40, 78, 164 m
 # The lower 3 correspond to surface, surface-subsurface, and subsurface species
 # and the values are based on the mean Average Living Depth of species in the dataset.
-dpths <- c(1,4,6,8)
+dpths <- c(1, 4, 6, 8)
 # Compare with the Average Living Depth of species in the dataset:
 spp <- unique(df$species) 
 row.names(sppDat) <- sppDat$species
@@ -399,28 +393,29 @@ source('raster_brick_import_fcn.R')
 
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
 bins <- unique(df$bin)
-bins <- sort(bins)
 allEnvNm <- paste(envNmShort, c('0m','surf','surfsub','sub'), sep='_')
 
-addEnv <- function(bin, dat, mods, binCol, cellCol, prj, env){
+addEnv <- function(bin, dat, mods, binCol, cellCol, prj, 
+                   env, envCols, dpths){
   slcBool <- dat[,binCol] == bin
   slc <- dat[slcBool,]
   slcCells <- slc[,cellCol]
-  slcEnv <- getBrik(bin=bin, envNm=envNm, mods=mods)
+  slcEnv <- getBrik(bin = bin, envNm = env, mods = mods)
   
   envVals <- raster::extract(slcEnv[[env]], slcCells)
   # Rows = points of extraction, columns = depth layers  
   envVals <- envVals[,dpths]
-  slc[,allEnvNm] <- envVals
+  slc[,envCols] <- envVals
   
   # Infer environment if it's missing and some of the adjacent 9 cells have values
-  # This reduces the number of occs without enviro from 837 to 160
+  # This reduces the number of occs without enviro from >800 to 200
   naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
   if (sum(naRows)>0){
     naCoords <- slc[naRows,c('centroid_long','centroid_lat')]
     # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
-    fillr <- raster::extract(slcEnv[[env]], naCoords, buffer=200*1000, fun=mean)
-    slc[naRows,allEnvNm] <- fillr[,dpths]
+    fillr <- raster::extract(slcEnv[[env]], naCoords, 
+                             buffer = 200*1000, fun = mean)
+    slc[naRows, envCols] <- fillr[,dpths]
   }
   slc
 }
@@ -428,63 +423,63 @@ addEnv <- function(bin, dat, mods, binCol, cellCol, prj, env){
 pkgs <- c('sp','raster') 
 registerDoParallel(nCore)
 sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
-  addEnv(bin=bin, env=envNm, dat=df, mods=modId,
-         binCol='bin', cellCol='cell_number', prj=llPrj)
+  addEnv(bin = bin, dat = df, mods = modId, binCol = 'bin', cellCol = 'cell_number', 
+         prj = llPrj, env = envNm, envCols = allEnvNm, dpths = dpths)
 stopImplicitCluster()
 
 # remove records where environment is unknown
-naRows <- apply(sppEnv[,allEnvNm], 1, function(r)
-  any(is.na(r))
-)
+naRows <- apply(sppEnv[,allEnvNm], 1, 
+                function(r) any(is.na(r))
+                )
 sppEnv <- sppEnv[!naRows,]
 
-obsNm <- paste0('Data/foram_uniq_occs_latlong_8ka_',day,'.csv')
+obsNm <- paste0('Data/foram_uniq_occs_latlong_8ka_', day, '.csv')
 write.csv(sppEnv, obsNm, row.names = FALSE)
 
 # Enviro at unique sampled sites ------------------------------------------
 
 # get the sampling universe (env at range-through core sites) per bin
-# coreAtts <- read.csv('Data/core_rangethrough_data_20-03-24.csv', stringsAsFactors=FALSE)
 sampEnv <- function(b){
   # for each bin, find out which cores range through the 8ky interval
-  inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad < (b+4))
+  inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad <= (b+4))
   slc <- coreAtts[inBin,]
   dupeCell <- duplicated(slc$cell)
   slc <- slc[!dupeCell,]
   
+  # TODO rotate coordinates to paleo-locations
+  
   # get the env values at the core locations
-  slcEnv <- getBrik(bin=b, envNm=envNm, mods=modId)
-  for (i in 1:length(envNm)){
-    env <- envNm[i]
-    envVals <- raster::extract(slcEnv[[env]], slc$cell)
-    # Rows = points of extraction, columns = depth layers  
-    envVals <- envVals[,dpths]
-    nmOld <- envNmShort[i]
-    nmNew <- paste(nmOld, c('0m','surf','surfsub','sub'), sep='_')
-    colnames(envVals) <- nmNew
-    sampled <- cbind(b, cell=slc$cell, envVals)
+  slcEnv <- getBrik(bin = b, envNm = envNm, mods = modId)
+  envVals <- raster::extract(slcEnv[[envNm]], slc$cell)
+  # Rows = points of extraction, columns = depth layers  
+  envVals <- envVals[,dpths]
+  colnames(envVals) <- allEnvNm
+  sampled <- cbind(b, cell = slc$cell, envVals)
+  
+  # interpolate missing values from the adjacent 9 cells
+  naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
+  if (sum(naRows) > 0){
+    naCoords <- slc[naRows, c('long','lat')]
+    # TODO replace with paleo-long and -lat
     
-    # interpolate missing values from the adjacent 9 cells
-    naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
-    if (sum(naRows)>0){
-      naCoords <- slc[naRows,c('long','lat')]
-      # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
-      fillr <- raster::extract(slcEnv[[env]], naCoords, buffer=200*1000, fun=mean)
-      sampled[naRows,nmNew] <- fillr[,dpths]
-    }
+    # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
+    fillr <- raster::extract(slcEnv[[envNm]], naCoords, 
+                             buffer = 200*1000, fun = mean)
+    sampled[naRows, allEnvNm] <- fillr[,dpths]
   }
   sampled
 }
+
 registerDoParallel(nCore)
 samp <- foreach(b=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
   sampEnv(b=b)
 stopImplicitCluster()
 
 # remove records where environment is unknown
-naSampRows <- apply(samp[,allEnvNm], 1, function(r)
-  any(is.na(r))
-)
+naSampRows <- apply(samp[,allEnvNm], 1, 
+                    function(r) any(is.na(r))
+                    )
 samp <- samp[!naSampRows,]
 
-sampNm <- paste0('Data/samp_uniq_occs_latlong_8ka_',day,'.csv')
+sampNm <- paste0('Data/samp_uniq_occs_latlong_8ka_', day, '.csv')
 write.csv(samp, sampNm, row.names = FALSE)
