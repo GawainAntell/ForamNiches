@@ -1,5 +1,5 @@
-# ForamNiches
-Essential files, in run order:
+# Repo overview: foraminiferal climatic niches project
+Files in run order:
 * BRIDGE GCM data prep
 * foram occ data prep
 * foram niche construction
@@ -10,7 +10,5 @@ Essential files, in run order:
 
 These rely on several functions:
 * raster brick import fcn
-* GSA custom ecospat fcns
+* paleocoords fcn
 * species kde buildr
-
-All other .R files are extraneous and may be too outdated for compatability with current data files.
