@@ -11,6 +11,10 @@ library(ggplot2)
 tRes <- 8
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
+# raster at the resolution of GCM data
+rEmpt <- raster(ncols=288, nrows=144, xmn=-180, xmx=180, ymn=-90, ymx=90)
+llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
 # Read in occurrence data
 occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 
@@ -96,12 +100,6 @@ corInfo <- function(cr){
 corMat <- sapply(corsUniqCln, corInfo)
 coreAtts <- data.frame(t(corMat))
 colnames(coreAtts) <- c('long','lat','lad','fad')
-
-# rasterize to the resolution of GCM data
-rEmpt <- raster(ncols=288, nrows=144, xmn=-180, xmx=180, ymn=-90, ymx=90)
-llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-corPts <- SpatialPoints(coreAtts[,c('long','lat')], CRS(llPrj))
-coreAtts$cell <- cellFromXY(rEmpt, corPts) 
 
 corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
 write.csv(coreAtts, corNm)
@@ -303,6 +301,7 @@ write.csv(sppDat, spDatNm, row.names = FALSE)
 
 # cut down file size
 irrel <- c('orig.species','abundance','orig.abundance','abun.units',
+           'age.st','age.en','AM.type','rel.abun','round.age',
            'site','hole','core','section','sample.top','sample.type',
            'total.IDd','preservation','processing','Comments',
            'Average.Area..µm2.','log.area','Approximate.diameter')
@@ -366,14 +365,7 @@ row.names(df) <- as.character(1:nrow(df))
 
 # Combine enviro and spp data ---------------------------------------------
 
-envNm <- 'ann_temp_ym_dpth'
-envNmShort <-  paste(strsplit(envNm,'_')[[1]][2:3], collapse='_')
-
-# Extract at each of 4 AOGCM depths: 0, 40, 78, 164 m
-# The lower 3 correspond to surface, surface-subsurface, and subsurface species
-# and the values are based on the mean Average Living Depth of species in the dataset.
-dpths <- c(1, 4, 6, 8)
-# Compare with the Average Living Depth of species in the dataset:
+# Calculate the Average Living Depth of species in the dataset:
 spp <- unique(df$species) 
 row.names(sppDat) <- sppDat$species
 sppDat <- sppDat[spp,]
@@ -389,10 +381,17 @@ for (z in zones){
 # [1] "Surface.subsurface 88"
 # [1] "Surface 42"
 
+# Find equivalent AOGCM depth levels from which to extract temp: 0, 40, 78, 164 m
+# The lower 3 correspond to surface, surface-subsurface, and subsurface species
+# and the values are based on the mean Average Living Depth of species in the dataset.
+dpths <- c(1, 4, 6, 8)
+
 source('raster_brick_import_fcn.R')
 
 modId <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors=FALSE)
 bins <- unique(df$bin)
+envNm <- 'ann_temp_ym_dpth'
+envNmShort <-  paste(strsplit(envNm,'_')[[1]][2:3], collapse='_')
 allEnvNm <- paste(envNmShort, c('0m','surf','surfsub','sub'), sep='_')
 
 addEnv <- function(bin, dat, mods, binCol, cellCol, prj, 
@@ -438,15 +437,32 @@ write.csv(sppEnv, obsNm, row.names = FALSE)
 
 # Enviro at unique sampled sites ------------------------------------------
 
+# read in modified function to reconstruct paleo-coordinates
+source('paleocoords_fcn.R')
+
 # get the sampling universe (env at range-through core sites) per bin
 sampEnv <- function(b){
   # for each bin, find out which cores range through the 8ky interval
   inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad <= (b+4))
   slc <- coreAtts[inBin,]
+  
+  # rotate lat-long coordinates to paleo-locations
+  palCoords <- pal.coord(slc, 'MATTHEWS2016', Ma = b/1000)
+  slc$pal.long <- palCoords$paleolng
+  slc$pal.lat  <- palCoords$paleolat
+  # use modern coordinates for the few points that can't be reconstructed
+  naPts <- apply(slc[, coordCols], 1, 
+                 function(r) any(is.na(r))
+  )
+  slc[naPts, coordCols] <- slc[naPts, c('long','lat')]
+  
+  # convert (paleo) lat-long to cell numbers, to shorten data to unique cells
+  pts <- SpatialPointsDataFrame(slc[, coordCols], 
+                                data = slc, proj4string = CRS(llPrj))
+  slc$cell <- cellFromXY(rEmpt, pts) 
+  
   dupeCell <- duplicated(slc$cell)
   slc <- slc[!dupeCell,]
-  
-  # TODO rotate coordinates to paleo-locations
   
   # get the env values at the core locations
   slcEnv <- getBrik(bin = b, envNm = envNm, mods = modId)
@@ -459,8 +475,7 @@ sampEnv <- function(b){
   # interpolate missing values from the adjacent 9 cells
   naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
   if (sum(naRows) > 0){
-    naCoords <- slc[naRows, c('long','lat')]
-    # TODO replace with paleo-long and -lat
+    naCoords <- slc[naRows, coordCols]
     
     # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
     fillr <- raster::extract(slcEnv[[envNm]], naCoords, 
@@ -469,6 +484,22 @@ sampEnv <- function(b){
   }
   sampled
 }
+
+# NB: The average distance between modern and reconstructed coordinates for the
+# oldest data (800 Ka) is only 26 km - far less than the length of a grid cell.
+  # b <- 800
+  # inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad <= (b+4))
+  # slc <- coreAtts[inBin,]
+  # palCoords <- pal.coord(slc, 'MATTHEWS2016', Ma = b/1000)
+  # slc$pal.long <- palCoords$paleolng
+  # slc$pal.lat  <- palCoords$paleolat
+  # mdrn <- SpatialPointsDataFrame(slc[, c('long','lat')], 
+  #                               data = slc, proj4string = CRS(llPrj))
+  # old  <- SpatialPointsDataFrame(slc[, coordCols], 
+  #                               data = slc, proj4string = CRS(llPrj))
+  # dists <- pointDistance(mdrn, old, longlat=TRUE)
+  # mean(dists)/1000
+  # > [1] 26.28166
 
 registerDoParallel(nCore)
 samp <- foreach(b=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
