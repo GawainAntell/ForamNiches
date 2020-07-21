@@ -11,20 +11,19 @@ library(tidyr)
 
 day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
-source('GSA_custom_ecospat_fcns.R')
 source('species_kde_buildr.R')
 
-df <- read.csv('Data/foram_uniq_occs_latlong_8ka_20-04-05.csv', 
+df <- read.csv('Data/foram_uniq_occs_latlong_8ka_20-07-16.csv', 
                stringsAsFactors = FALSE)
-samp <- read.csv('Data/samp_uniq_occs_latlong_8ka_20-04-05.csv',
+samp <- read.csv('Data/samp_uniq_occs_latlong_8ka_20-07-16.csv',
                  stringsAsFactors = FALSE)
-spAttr <- read.csv('Data/foram_spp_data_20-04-05.csv',
+spAttr <- read.csv('Data/foram_spp_data_20-07-16.csv',
                    stringsAsFactors = FALSE)
 
 envNm <- 'temp_ym'
 envCols <- grep(envNm, colnames(df))
 allEnvNm <- colnames(df)[envCols]
-df <- df[,c('species','bin',allEnvNm)] # 'cell_number','coreUniq',
+df <- df[,c('species', 'bin', allEnvNm)] # 'cell_number','coreUniq',
 colnames(samp)[1:2] <- c('bin','cell_number')
 spp <- unique(df$species)
 bins <- unique(df$bin)
@@ -32,7 +31,7 @@ nCore <- detectCores() - 1
 
 # Truncate to standard temp range -----------------------------------------
 
-# Restrict to the last 700 ka, encompassing 7 glacial/interglacial cycles
+# Restrict to the last 700 ka, to trim edge effects of range-through cores
 trimBool <- df$bin <= 700
 df <- df[trimBool,]
 sampTrim <- samp$bin <= 700
@@ -67,8 +66,8 @@ truncatr <- function(e){
   sampSmry <- sapply(bins, minmax, df=samp, env=e)
   uppr <- min(sampSmry[2,])
   lwr <- max(sampSmry[1,])
-  out <- c(round(uppr,1), round(lwr, 1))
-  print(out)
+  prnt <- c(round(uppr,1), round(lwr, 1))
+  print(prnt)
   
   # Consider only the species within the focal habitat zone
   zone <- e2zone(e)
@@ -83,24 +82,24 @@ truncatr <- function(e){
     slc <- zoneDf[bBool,]
     tooBig <- which(slc[,e] > uppr)
     tooSmol <- which(slc[,e] < lwr)
-    out <- c(tooBig, tooSmol)
-    if (length(out) > 0){
-      slc <- slc[-out,]
+    toss <- c(tooBig, tooSmol)
+    if (length(toss) > 0){
+      slc <- slc[-toss,]
     }
     trunc <- rbind(trunc, slc)
     
     bBoolSamp <- samp$bin==b
     slcSamp <- samp[bBoolSamp,]
-    tooBig <- which(slcSamp[,e] > uppr)
-    tooSmol <- which(slcSamp[,e] < lwr)
-    out <- c(tooBig, tooSmol)
-    if (length(out) > 0){
-      slcSamp <- slcSamp[-out,]
+    tooBigSamp <- which(slcSamp[,e] > uppr)
+    tooSmolSamp <- which(slcSamp[,e] < lwr)
+    sampToss <- c(tooBigSamp, tooSmolSamp)
+    if (length(sampToss) > 0){
+      slcSamp <- slcSamp[-sampToss,]
     }
     truncSamp <- rbind(truncSamp, slcSamp)
   }
   
-  # The last steps could introduce species with <6 occs.
+  # The last steps could introduce species with <6 occs
   tossRowsL <- 
     sapply(spp, function(x){
       sapply(bins, function(b){
@@ -125,7 +124,7 @@ truncatr <- function(e){
     spB <- sort(unique(spDf$bin))
     bDiff <- diff(spB)
     diffTxt <- paste0(bDiff, collapse='')
-    srch <- grep(enufTxt,diffTxt)
+    srch <- grep(enufTxt, diffTxt)
     if (length(srch) > 0){
       keepSpp <- c(keepSpp, s)
     }
@@ -134,12 +133,12 @@ truncatr <- function(e){
   trunc <- trunc[keepBool,]
   
   # retain the columns necessary and sufficient for KDE
-  trunc <- trunc[,c('species','bin',e)]
+  trunc <- trunc[, c('species', 'bin', e)]
   colnames(trunc)[3] <- envNm
-  truncSamp <- truncSamp[,c('bin',e)]
+  truncSamp <- truncSamp[, c('bin', e)]
   colnames(truncSamp)[2] <- envNm
   
-  list(sp=trunc, samp=truncSamp)
+  list(sp = trunc, samp = truncSamp)
   # output is a list of two dataframes (species-level data & sampling data)
 }
 
@@ -198,7 +197,7 @@ for (i in 1:length(bins)){
 }
 
 # warning - this could take 1 - 2 hours
-pkg <- c('pracma','GoFKernel')
+pkg <- c('pracma','GoFKernel','kerneval')
 pt1 <- proc.time()
 registerDoParallel(nCore)
 kdeSum <- foreach(dat=truncEnv[2:4], .combine=rbind, .inorder=FALSE, .packages=pkg) %:% 
@@ -218,16 +217,17 @@ kdeSumSS <- kdeSumSS[!naSS,]
 
 # Non-KDE niche summary ---------------------------------------------------
 
-# Need mean, variance, sample size, & age of trait values for each sp & bin
+# Need sample size, mean, and variance of trait values for each sp & bin
 sumup <- function(bin, s, dat, binCol, sCol, traitCol){
   slcRows <- which(dat$sp[,binCol] == bin & dat$sp[,sCol] == s)
-  if (length(slcRows)>0){
+  if (length(slcRows) > 0){
     x <- dat$sp[slcRows,envNm]
     m <- mean(x)
     sd <- sd(x)
     n <- length(x)
     rtrn <- data.frame(bin=bin, sp=s, m=m, sd=sd, n=n)
   } else {
+    # some species do not occur in every bin
     rtrn <- data.frame()
   }
   return(rtrn)
@@ -236,25 +236,25 @@ sumup <- function(bin, s, dat, binCol, sCol, traitCol){
 # iterate over bins over species over depth habitats
 envL <- lapply(truncEnv[2:4], function(dat){
   spL <- lapply(spp, function(s){
-    binL <- lapply(bins, sumup, s=s, dat=dat, 
-                   binCol='bin', sCol='species', traitCol=envNm)
+    binL <- lapply(bins, sumup, s = s, dat = dat, 
+                   binCol = 'bin', sCol = 'species', traitCol = envNm)
     binDf <- do.call(rbind, binL)
   })
   spDf <- do.call(rbind, spL)
 })
 rawSum <- do.call(rbind, envL)
 
-# iterate over bins over species, surface values only
+# iterate over bins over species, sea surface values only
 envLss <- lapply(spp, function(s){
-  binL <- lapply(bins, sumup, s=s, dat=truncEnv[[1]], 
-                 binCol='bin', sCol='species', traitCol=envNm)
+  binL <- lapply(bins, sumup, s = s, dat = truncEnv[[1]], 
+                 binCol = 'bin', sCol = 'species', traitCol = envNm)
   binDf <- do.call(rbind, binL)
 })
 rawSumSS <- do.call(rbind, envLss)
 
 # combine KDE and finite sample statistics into same output
 fullSum <- merge(kdeSum, rawSum, all.x=TRUE)
-sumNm <- paste0('Data/foram_niche_sumry_metrics_',day,'.csv')
+sumNm <- paste0('Data/foram_niche_sumry_metrics_hab',day,'.csv')
 write.csv(fullSum, sumNm, row.names=FALSE)
 fullSumSS <- merge(kdeSumSS, rawSumSS, all.x=TRUE)
 sumSSnm <- paste0('Data/foram_niche_sumry_metrics_0m_',day,'.csv')
