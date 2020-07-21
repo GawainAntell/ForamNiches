@@ -4,21 +4,20 @@ library(parallel)
 library(foreach)
 library(iterators)
 library(doParallel)
-library(ggplot2)
 
 # Data import -------------------------------------------------------------
 
-tRes <- 8
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
+tRes <- 8 # resolution in kilo anna
+day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 
-# raster at the resolution of GCM data
+# raster at the resolution of GCM data (1.25 degrees)
 rEmpt <- raster(ncols=288, nrows=144, xmn=-180, xmx=180, ymn=-90, ymx=90)
 llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 
 # Read in occurrence data
 occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
 
-# easier to work on scale of Ka not Ma
+# easier to work on scale of ka not Ma
 occ$age <- occ$age*1000
 
 # typo
@@ -31,7 +30,7 @@ coordCols <- c('pal.long','pal.lat')
 shall <- which(occ$water.depth < 100)
 occ <- occ[-shall,]
 
-# Clean core IDs ----------------------------------------------------------
+# Core range-through data -------------------------------------------------
 
 # There are sometimes 2 or 3 coreID's per hole, with .a/.b/.c suffix,
 # seemingly because of differences in data entry rules.
@@ -46,8 +45,7 @@ occ$coreUniq <- sapply(occ$coreUniq, rmSuffix)
 
 # Note that 'core' is not a unique identifier, and many 'hole' values are NA.
 # The coreID is nearly unique, but there are mistakes.
-# Make sure that the coordinates match or are very close (< 100m)
-# and if not, then create a new coreID.
+# Make sure that the coordinates of the same ID match or are very close (< 100m).
 
 # export a spreadsheet of problem IDs to fix in original database
 # corsUniq <- unique(occ$coreUniq)
@@ -68,11 +66,10 @@ occ$coreUniq <- sapply(occ$coreUniq, rmSuffix)
 #   }
 # }
 # write.csv(problm, paste0('Data/problem_core_IDs_for_IF_',day,'.csv'))
-# badID <- unique(problm$coreUniq)
 
 # Cores RC8C80, RC8C81, RC8C82, RC8C83, RC9C98 and RC9C99
 # each contain duplicate sets of entries, with different coordinates 
-# for each set. It's unclear which is correct.
+# for each set. It's unclear which set of locations is correct.
 problm1 <- occ$coreUniq %in% 
   c('RC8C80','RC8C81','RC8C82','RC8C83','RC9C98','RC9C99')
 occ <- occ[!problm1,]
@@ -88,8 +85,7 @@ newLat <- mean(c(examp1$pal.lat, examp2$pal.lat))
 occ$pal.long[c(problm2, problm3)] <- newLong
 occ$pal.lat[ c(problm2, problm3)] <- newLat
 
-# Extract core range-through data -----------------------------------------
-
+# Extract core range-through data
 corsUniqCln <- unique(occ$coreUniq)
 corInfo <- function(cr){
   crRows <- which(occ$coreUniq==cr)
@@ -100,9 +96,6 @@ corInfo <- function(cr){
 corMat <- sapply(corsUniqCln, corInfo)
 coreAtts <- data.frame(t(corMat))
 colnames(coreAtts) <- c('long','lat','lad','fad')
-
-corNm <- paste0('Data/core_rangethrough_data_',day,'.csv')
-write.csv(coreAtts, corNm)
 
 # Absence data --------------------------------------------------------------
 
@@ -116,7 +109,7 @@ occ <- occ[-naAbund,]
 uniqAbund <- unique(occ$orig.abundance)
 numAbund <- suppressWarnings(as.numeric(uniqAbund))
 nonNum <- uniqAbund[is.na(numAbund)]
-nonNum
+  # print(nonNum)
 # Data in these categories should be omitted:
 bad <- c('-', '/', '*', 'rw?', '#0.0', '?1', 'p?')
 badBool <- occ$orig.abundance %in% bad
@@ -143,7 +136,7 @@ occ <- occ[-tooYng,]
 # excise sp traits into a separate, sp-level file to call later in analysis
 traits <- c('morphDes','spinose','Macro.micro','structure','aperture',
             'latest','earliest','mph','mphRef','eco','ecoRef','geo','geoRef',
-            'log.area','Approximate.diameter') # 'Average.Area.microm2',
+            'log.area','Approximate.diameter') 
 sppDat <- occ[,c('species',traits)]
 dupes <- duplicated(sppDat$species)
 sppDat <- sppDat[!dupes,]
@@ -296,8 +289,8 @@ newCols <- colnames(dpthTbl)[-1]
 sppDat[,newCols] <- NA
 spPos <- match(dpthTbl$Species, sppDot)
 sppDat[spPos,newCols] <- dpthTbl[,-1]
-spDatNm <- paste0('Data/foram_spp_data_', day, '.csv')
-write.csv(sppDat, spDatNm, row.names = FALSE)
+sppDatNm <- paste0('Data/foram-spp-data_', day, '.csv')
+write.csv(sppDat, sppDatNm, row.names = FALSE)
 
 # cut down file size
 irrel <- c('orig.species','abundance','orig.abundance','abun.units',
@@ -332,8 +325,8 @@ for (r in 1:nrow(occ)){
 }
 
 # Rasterize to the resolution of GCM data
-pts <- SpatialPointsDataFrame(occ[, coordCols], 
-                              data = occ, proj4string = CRS(llPrj))
+pts <- SpatialPointsDataFrame(occ[, coordCols], data = occ, 
+                              proj4string = crs('+init=epsg:4326'))
 occ$cell_number <- cellFromXY(rEmpt, pts) 
 occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
 
@@ -410,7 +403,7 @@ addEnv <- function(bin, dat, mods, binCol, cellCol, prj,
   # This reduces the number of occs without enviro from >800 to 200
   naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
   if (sum(naRows)>0){
-    naCoords <- slc[naRows,c('centroid_long','centroid_lat')]
+    naCoords <- slc[naRows, c('centroid_long','centroid_lat')]
     # distance to corner cell is 196 km for 1.25-degree resolution (~111 km/degree)
     fillr <- raster::extract(slcEnv[[env]], naCoords, 
                              buffer = 200*1000, fun = mean)
@@ -426,22 +419,61 @@ sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dop
          prj = llPrj, env = envNm, envCols = allEnvNm, dpths = dpths)
 stopImplicitCluster()
 
-# remove records where environment is unknown
+# Clean spp data ----------------------------------------------------------
+
+# remove 199 records where environment is unknown
 naRows <- apply(sppEnv[,allEnvNm], 1, 
                 function(r) any(is.na(r))
                 )
 sppEnv <- sppEnv[!naRows,]
 
-obsNm <- paste0('Data/foram_uniq_occs_latlong_8ka_', day, '.csv')
-write.csv(sppEnv, obsNm, row.names = FALSE)
+# restrict to the last 700 ka, to trim edge effects of range-through cores
+trimBool <- sppEnv$bin <= 700
+sppEnv <- sppEnv[trimBool,]
+bins <- bins[bins <= 700]
 
-# Enviro at unique sampled sites ------------------------------------------
+# reduce size for later computation
+sppEnv <- sppEnv[,c('species', 'bin', allEnvNm)] # 'cell_number','coreUniq',
+
+# retain only species with at least 6 occs per bin
+for (b in bins){
+  slcBool <- sppEnv$bin==b
+  slc <- sppEnv[slcBool,]
+  frq <- table(slc$species)
+  tooFew <- frq < 6
+  tossSpp <- names(frq[tooFew])
+  tossRows <- which(slcBool & sppEnv$species %in% tossSpp)
+  sppEnv <- sppEnv[-tossRows,]
+}
+
+# retain only species with at least 7 successive steps i.e. 6 boundary crossings
+binL <- bins[2] - bins[1]
+enuf <- rep(binL, 6)
+enufTxt <- paste0(enuf, collapse='')
+
+abundSpp <- unique(sppEnv$species)
+longSpp <- c()
+for (s in abundSpp){
+  spBool <- sppEnv$species==s
+  spDf <- sppEnv[spBool,]
+  spB <- sort(unique(spDf$bin))
+  bDiff <- diff(spB)
+  diffTxt <- paste0(bDiff, collapse='')
+  srch <- grep(enufTxt, diffTxt)
+  if (length(srch) > 0){
+    longSpp <- c(longSpp, s)
+  }
+}
+keepLong <- sppEnv$species %in% longSpp
+sppEnv <- sppEnv[keepLong,]
+
+# Combine enviro and core data --------------------------------------------
 
 # read in modified function to reconstruct paleo-coordinates
 source('paleocoords_fcn.R')
 
 # get the sampling universe (env at range-through core sites) per bin
-sampEnv <- function(b){
+envSamplr <- function(b){
   # for each bin, find out which cores range through the 8ky interval
   inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad <= (b+4))
   slc <- coreAtts[inBin,]
@@ -470,7 +502,7 @@ sampEnv <- function(b){
   # Rows = points of extraction, columns = depth layers  
   envVals <- envVals[,dpths]
   colnames(envVals) <- allEnvNm
-  sampled <- cbind(b, cell = slc$cell, envVals)
+  sampled <- cbind(bin = b, cell = slc$cell, envVals)
   
   # interpolate missing values from the adjacent 9 cells
   naRows <- apply(envVals, 1, function(x) any(is.na(x)) )
@@ -502,15 +534,57 @@ sampEnv <- function(b){
   # > [1] 26.28166
 
 registerDoParallel(nCore)
-samp <- foreach(b=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
-  sampEnv(b=b)
+sampMat <- foreach(b=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
+  envSamplr(b=b)
 stopImplicitCluster()
 
 # remove records where environment is unknown
-naSampRows <- apply(samp[,allEnvNm], 1, 
+naSampRows <- apply(sampMat[,allEnvNm], 1, 
                     function(r) any(is.na(r))
                     )
-samp <- samp[!naSampRows,]
+sampMat <- sampMat[!naSampRows,]
+sampEnv <- data.frame(sampMat)
 
-sampNm <- paste0('Data/samp_uniq_occs_latlong_8ka_', day, '.csv')
-write.csv(samp, sampNm, row.names = FALSE)
+# Export combined spp/core data -------------------------------------------
+
+# Note: it would admittedly be more size-efficient and easier for viewing
+# to export the sppEnv and sampEnv objects as 2 csv files.
+# However, the "foram niche construction" and "analysis niches vs climate"
+# scripts require a top-level data structure distinction between habitat depths,
+# not between species vs sampling data. Therefore, the code chunk below
+# combines the two sets of data into one list object, with 4 sublists.
+# Each (sub)list contains a species-level and all-sampling-site dataframe
+# for a given habitat depth. The total list is saved as an rds file.
+
+# Convert an environmental variable name to habitat name
+e2zone <- function(txt){ 
+  switch(txt, 
+         temp_ym_0m = c('Surface', 'Surface.subsurface', 'Subsurface'), 
+         temp_ym_surf = 'Surface',
+         temp_ym_surfsub = 'Surface.subsurface',
+         temp_ym_sub = 'Subsurface')
+}
+
+splittr <- function(e){
+  # consider only the species within the focal habitat zone
+  zone <- e2zone(e)
+  zonePos <- sppDat$DepthHabitat %in% zone
+  zoneSp <- sppDat$species[zonePos]
+  zoneDfPos <- sppEnv$species %in% zoneSp
+  zoneDf <- sppEnv[zoneDfPos,]
+  
+  # retain the columns necessary and sufficient for KDE
+  zoneDf <- zoneDf[, c('species', 'bin', e)]
+  colnames(zoneDf)[3] <- envNmShort
+  sampE <- sampEnv[, c('bin', e)]
+  colnames(sampE)[2] <- envNmShort
+  
+  list(sp = zoneDf, samp = sampE)
+}
+
+cbn <- lapply(allEnvNm, splittr)
+names(cbn) <- allEnvNm
+nrow(sppEnv) # number of unique bin-cell-species occurrences
+length(unique(sppEnv$species)) # number of species for analysis
+cbnNm <- paste0('Data/spp-and-sampling-data_list-by-depth_',day,'.rds')
+saveRDS(cbn, cbnNm)
