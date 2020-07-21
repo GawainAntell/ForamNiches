@@ -1,57 +1,46 @@
+library(kerneval)
+
+# get peak abundance and preferred environment
+nichStats <- function(dens){
+  pa <- max(dens$y)
+  pePos <- which.max(dens$y)
+  pe <- dens$x[pePos]
+  c(pa = pa, pe = pe)
+}
 
 # Output 1 sp's niche overlap (though time), peak abundance, & preferred enviro
 nicher <- function(dat, b1, b2, s, env, xmn, xmx,
                    w1 = NULL, w2 = NULL, reflect = FALSE, ...){
   
-  sp1rows <- which(dat$sp$species==s & dat$sp$bin==b1)
-  sp1 <- dat$sp[sp1rows,envNm]
+  sp1rows <- which(dat$sp$species == s & dat$sp$bin == b1)
+  sp2rows <- which(dat$sp$species == s & dat$sp$bin == b2)
+  sp1 <- dat$sp[sp1rows, envNm]
+  sp2 <- dat$sp[sp2rows, envNm]
   
-  sp2rows <- which(dat$sp$species==s & dat$sp$bin==b2)
-  sp2 <- dat$sp[sp2rows,envNm]
+  d1 <- tryCatch(
+    transdens(sp1, w = w1, bw = 'nrd0', reflect = reflect, a = xmn, b = xmx, ...),
+    #     bw = 'SJ-ste'
+    error = function(err){ list() }
+  ) 
+  d2 <- tryCatch(
+    transdens(sp2, w = w2, bw = 'nrd0', reflect = reflect, a = xmn, b = xmx, ...),
+    error = function(err){ list() }
+  ) 
   
-  noWeight <- any(is.null(w1), is.null(w2))
-  if (! noWeight){
-    d1 <- tryCatch(
-      transformEst(sp1, w = w1, bw='SJ-ste', reflect = reflect, a = xmn, b = xmx, ...),
-      #      JonesEst(sp1, w = w1, bw='brt', reflect = reflect, a = xmn, b = xmx, ...),
-      error = function(err){ list() }
-    ) 
-    d2 <- tryCatch(
-      transformEst(sp2, w = w2, bw='SJ-ste', reflect = reflect, a = xmn, b = xmx, ...),
-      #      JonesEst(sp2, w = w2, bw='brt', reflect = reflect, a = xmn, b = xmx, ...),
-      error = function(err){ list() }
-    ) 
+  # The species may be absent in one or both bins. If absent, d is an empty list
+  if (length(d1) == 0){
+    data.frame(bin = NA, bin2 = NA, sp = NA, h = NA, pa = NA, pe = NA, 
+               bw1 = NA, bw2 = NA, n1 = NA, n2 = NA)
   } else {
-    # use unweighted sampling, either regular density or reflected:
-    if (reflect){
-      d1 <- tryCatch(
-        density.reflected(sp1, bw='SJ-ste', lower = xmn, upper = xmx, ...),
-      )
-      d2 <- tryCatch(
-        density.reflected(sp2, bw='SJ-ste', lower = xmn, upper = xmx, ...),
-      )
-    } else {
-      d1 <- tryCatch(
-        density(sp1, bw='SJ-ste', from = xmn, to = xmx, ...),
-      )
-      d2 <- tryCatch(
-        density(sp2, bw='SJ-ste', from = xmn, to = xmx, ...),
-      )
-    }
-  }
-  
-  # the species may be absent in one or both bins, in which case d is an empty list
-  if (length(d1)==0){
-    data.frame(bin=NA, bin2=NA, sp=NA, h=NA, pa=NA, pe=NA)
+    d1deets <- nichStats(d1)
     
-  } else {
-    stats <- nichStats(d1)
-    
-    if (length(d2)==0){
-      data.frame(bin=b1, bin2=b2, sp=s, h=NA, t(stats))
+    if (length(d2) == 0){
+      data.frame(bin = b1, bin2 = b2, sp = s, h = NA, t(d1deets),
+                 bw1 = d1$bw, bw2 = NA, n1 = length(sp1), n2 = length(sp2))
     } else{
-      h <- hell(d1, d2, extrap = TRUE) 
-      data.frame(bin=b1, bin2=b2, sp=s, h=h, t(stats))
+      h <- hell(d1, d2) 
+      data.frame(bin = b1, bin2 = b2, sp = s, h = h, t(d1deets),
+                 bw1 = d1$bw, bw2 = d2$bw, n1 = length(sp1), n2 = length(sp2))
     }
   }
 }
@@ -63,38 +52,25 @@ kde <- function(dat, bPair, envNm){
   xmx <- max(dat$samp[,envNm])
   
   # estimate bias function for each time bin based on sampling distribution
-  sampRows1 <- which(dat$samp$bin==b1)
-  samp1 <- dat$samp[sampRows1,envNm]
+  sampRows1 <- which(dat$samp$bin == b1)
+  samp1 <- dat$samp[sampRows1, envNm]
   # Reflecting the sample curve doesn't change the sp KDE much
   # except that the ends turn down a bit more (more convexity).
-  # Since it's more complicated and throws warnings, don't do it.
-  densSamp1 <- density(samp1, bw='SJ-ste', from=xmn, to=xmx)
-  #  densSamp1 <- density.reflected(samp1, lower=xmn, upper=xmx) 
+  # Since it's more complicated, don't do it.
+  densSamp1 <- density(samp1, bw='nrd0', from=xmn, to=xmx)
   w1 <- approxfun(densSamp1$x, densSamp1$y)
   
-  # in the most recent time bin, there is no subsequent bin
+  # estimate bias function for the younger time bin
   if (is.na(b2)){
+    # in the most recent time bin (4 ka), there is no subsequent bin
     w2 <- NA
-    
-    # redefine axis limits - discretization of samp KDE can shrink them a bit
-    xmnNew <- min(densSamp1$x)
-    xmxNew <- max(densSamp1$x)
   } else {
-    sampRows2 <- which(dat$samp$bin==b2)
-    samp2 <- dat$samp[sampRows2,envNm]
-    densSamp2 <- density(samp2, bw='SJ-ste', from=xmn, to=xmx)
-    #  densSamp2 <- density.reflected(samp2, lower=xmn, upper=xmx) 
+    sampRows2 <- which(dat$samp$bin == b2)
+    samp2 <- dat$samp[sampRows2, envNm]
+    densSamp2 <- density(samp2, bw = 'nrd0', from = xmn, to = xmx)
     w2 <- approxfun(densSamp2$x, densSamp2$y)
-    
-    # redefine axis limits - discretization of samp KDE can shrink them a bit
-#    lim1 <- range(densSamp1$x)
-#    lim2 <- range(densSamp2$x)
-#    xmnNew <- max(lim1[1], lim2[1])
-#    xmxNew <- min(lim1[2], lim2[2])
   } 
-#  if (sum(identical(xmn, xmnNew), identical(xmx, xmxNew))!=2){
-#    error('code needed after all')
-#  }
+  
   zoneSp <- unique(dat$sp$species)
   sList <- lapply(zoneSp, function(s){
     nicher(dat = dat, b1 = b1, b2 = b2, s = s,
