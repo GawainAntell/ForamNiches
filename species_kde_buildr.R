@@ -18,12 +18,12 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
   sp2 <- dat$sp[sp2rows, envNm]
   
   d1 <- tryCatch(
-    transdens(sp1, w = w1, bw = 'nrd0', reflect = reflect, a = xmn, b = xmx, ...),
-    #     bw = 'SJ-ste'
+    # set bounds so density extends enough for H comparison on same x-interval
+    transdens(sp1, w = w1, reflect = reflect, a = xmn, b = xmx, ...),
     error = function(err){ list() }
   ) 
   d2 <- tryCatch(
-    transdens(sp2, w = w2, bw = 'nrd0', reflect = reflect, a = xmn, b = xmx, ...),
+    transdens(sp2, w = w2, reflect = reflect, a = xmn, b = xmx, ...),
     error = function(err){ list() }
   ) 
   
@@ -39,25 +39,35 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
                  bw1 = d1$bw, bw2 = NA, n1 = length(sp1), n2 = length(sp2))
     } else{
       h <- hell(d1, d2) 
+# a = xmn, b = xmx # not necessary to specify limits since densities are cropped
       data.frame(bin = b1, bin2 = b2, sp = s, h = h, t(d1deets),
                  bw1 = d1$bw, bw2 = d2$bw, n1 = length(sp1), n2 = length(sp2))
     }
   }
 }
 
-kde <- function(dat, bPair, envNm){
-  b1 <- bPair[1]
-  b2 <- bPair[2]
-  xmn <- min(dat$samp[,envNm])
-  xmx <- max(dat$samp[,envNm])
+# find the temperature thresholds for a given depth zone
+minmax <- function(df, b, env){ 
+  bBool <- df[,'bin'] == b
+  slc <- df[bBool,]
+  range(slc[,env])
+}
+
+kde <- function(dat, bPair, envNm, bw = 'nrd0'){
+  # determine the standard axis limits for the depth habitat
+  sampSmry <- sapply(bins, minmax, df=dat$samp, env=envNm)
+  xmx <- min(sampSmry[2,])
+  xmn <- max(sampSmry[1,])
   
   # estimate bias function for each time bin based on sampling distribution
+  b1 <- bPair[1]
+  b2 <- bPair[2]
   sampRows1 <- which(dat$samp$bin == b1)
   samp1 <- dat$samp[sampRows1, envNm]
   # Reflecting the sample curve doesn't change the sp KDE much
   # except that the ends turn down a bit more (more convexity).
   # Since it's more complicated, don't do it.
-  densSamp1 <- density(samp1, bw='nrd0', from=xmn, to=xmx)
+  densSamp1 <- density(samp1, bw = bw)
   w1 <- approxfun(densSamp1$x, densSamp1$y)
   
   # estimate bias function for the younger time bin
@@ -67,13 +77,13 @@ kde <- function(dat, bPair, envNm){
   } else {
     sampRows2 <- which(dat$samp$bin == b2)
     samp2 <- dat$samp[sampRows2, envNm]
-    densSamp2 <- density(samp2, bw = 'nrd0', from = xmn, to = xmx)
+    densSamp2 <- density(samp2, bw = bw)
     w2 <- approxfun(densSamp2$x, densSamp2$y)
   } 
   
   zoneSp <- unique(dat$sp$species)
   sList <- lapply(zoneSp, function(s){
-    nicher(dat = dat, b1 = b1, b2 = b2, s = s,
+    nicher(dat = dat, bw = bw, b1 = b1, b2 = b2, s = s,
            w1 = w1, w2 = w2, xmn = xmn, xmx = xmx)
   })
   do.call(rbind, sList)
