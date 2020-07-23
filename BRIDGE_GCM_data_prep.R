@@ -110,8 +110,7 @@ pt2 <- proc.time()
 x <- seq(-170, 180, by=10)
 y <- seq(-80, 80, by=10)
 xy <- expand.grid(x=x,y=y)
-#llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-xy <- SpatialPoints(xy, proj4string = CRS(llPrj))
+xy <- SpatialPoints(xy, proj4string = crs('+init=epsg:4326'))
 
 source('raster_brick_import_fcn.R')
 
@@ -129,4 +128,4 @@ colnames(glob) <- ageSteps
 glob$lat <- y
 glob$long <- x
 glob <- glob[!land,]
-write.csv(glob, 'Data/global_surface_MAT_at_grid_pts_4ka.csv', row.names = FALSE)
+write.csv(glob, 'Data/global-surface-MAT_10-deg-grid_4ka.csv', row.names = FALSE)
