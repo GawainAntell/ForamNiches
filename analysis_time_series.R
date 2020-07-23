@@ -6,17 +6,17 @@ library(gridExtra)
 library(tidyr)
 
 # set whether to run analyses on surface-level or in-habitat niches
-ss <- FALSE
+ss <- TRUE
 
 # Data prep ---------------------------------------------------------------
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
+day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 
 # foram data
-spAttr <- read.csv('Data/foram_spp_data_20-04-05.csv', stringsAsFactors=FALSE)
+spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv', stringsAsFactors=FALSE)
 if (ss){
-  df <- read.csv('Data/foram_niche_sumry_metrics_0m_20-04-05.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_nrd0_SS_2020-07-22.csv', stringsAsFactors=FALSE)
 } else {
-  df <- read.csv('Data/foram_niche_sumry_metrics_20-04-05.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_nrd0_hab_2020-07-22.csv', stringsAsFactors=FALSE)
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -24,29 +24,44 @@ bins <- unique(df$bin)
 spp <- unique(df$sp)
 nspp <- length(spp)
 binL <- bins[1] - bins[2]
-
-# standardized sampling universe (MAT at range-through core sites) at each of 4 depths
-samp <- readRDS('Data/sampled_temp_ym_bin_summary_by_depth_20-04-05.rds')
 envNm <- 'temp_ym'
+
+# standardized sampling universe (MAT at core sites) at each of 4 depths
+dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
+# get mean, sd, and n across sites in order to fit evo models to sampling seqs
+bsum <- function(d){
+  bMat <- sapply(bins, function(b){
+    bBool <- d$samp$bin==b
+    slc <- d$samp[bBool,]
+    m <- mean(slc$temp_ym)
+    sdv <- sd(slc$temp_ym)
+    nsite <- nrow(slc)
+    cbind(b, m, sdv, nsite)
+  })
+  bDf <- data.frame(t(bMat))
+  colnames(bDf) <- c('bin','m','sd','nsite')
+  bDf
+}
+samp <- lapply(dList, bsum)
 
 # Deal with incomplete sp ts ----------------------------------------------
 
 # rename species so non-consecutive sequences have a numerical suffix
 spL <-  vector('list', length = nspp)
 for (i in 1:nspp){
-  s <- spp[i]
-  spBool <- df$sp==s
+  spNm <- spp[i]
+  spBool <- df$sp==spNm
   sp <- df[spBool,]
   j <- 1
-  sp$sp[1] <- paste0(s, j)
+  sp$sp[1] <- paste0(spNm, j)
   penult <- nrow(sp) - 1
   for (r in 1:penult){
     age <- sp$bin[r]
     nextAge <- sp$bin[r+1]
-    if (age !=  nextAge+binL){
+    if (age != nextAge + binL){
       j <- j + 1
     }
-    sp$sp[r+1] <- paste0(s, j)
+    sp$sp[r+1] <- paste0(spNm, j)
   }
   spL[[i]] <- sp
 }
@@ -82,15 +97,15 @@ trnslt <- function(txt){
   )
 }
 
-evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
+evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
   spBool <- dat$sp==s
   sp <- dat[spBool,]
   # also subset the sampling time series to the same bins, for comparison
   sBins <- sp$bin
   
-  # lookup the species' habitat and use corresponding sampling universe
-  sShrt <- substr(s, 1, (nchar(s)-2))
-  attrRow <- grep(paste0(sShrt,'*'), spDat$species)
+  # lookup the species' habitat and use corresponding depth for sampling data
+  sShort <- substr(s, 1, (nchar(s)-2))
+  attrRow <- grep(paste0(sShort,'*'), spDat$species)
   hab <- spDat$DepthHabitat[attrRow]
   lvl <- trnslt(hab)
   sampDpth <- sampDat[[lvl]]
@@ -121,11 +136,11 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   
   # some sample variances are not equal, so use pool=FALSE for all sequences
   if (l > 13 & nmods=='nine'){
-    modsSp <- fit9models(ts, method='AD', silent=TRUE, pool=FALSE)
-    modsSamp <- fit9models(tsSamp, method='AD', silent=TRUE, pool=FALSE)
+    modsSp <- fit9models(ts, method=method, silent=TRUE, pool=FALSE)
+    modsSamp <- fit9models(tsSamp, method=method, silent=TRUE, pool=FALSE)
   } else {
-    modsSp <- fit4models(ts, method='AD', silent=TRUE, pool=FALSE) 
-    modsSamp <- fit4models(tsSamp, method='AD', silent=TRUE, pool=FALSE) 
+    modsSp <- fit4models(ts, method=method, silent=TRUE, pool=FALSE) 
+    modsSamp <- fit4models(tsSamp, method=method, silent=TRUE, pool=FALSE) 
   }
   # From the package documentation:
   # 'Method = "Joint" is a full likelihood approach, considering each time-series as a joint sample
@@ -136,8 +151,8 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   # 'joint parameterization  is  better  able  to  correctly  identify  directional  trends. 
   # This advantage increases with sequence length, and is most pronounced when sampling error is high'
   
-  # HOWEVER, although joint might be better for most series, for Pulleniatina obliquiloculata3 
-  # a fatal error occurs (matrix not full rank?) unless pool and hess arguments are modified
+  # HOWEVER, although joint might be better for most series, for 'Globigerinella calida6' 
+  # a fatal error occurs (matrix not full rank) unless pool and hess arguments are modified
   # Error in optim(p0, fn = logL.joint.URW, control = cl, method = meth, lower = c(NA,  : 
   # non-finite value supplied by optim
   
@@ -149,17 +164,26 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four'){
   sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
   sampEvo <- row.names(modsSamp$modelFits)[sampMx]
   
-  out <- data.frame(sp=s, l=l, start=strt, r=sCor, 
-                    bestMod=modNm, t(wts), 
-                    samplingMod=sampEvo)
+  out <- data.frame(sp = s, l = l, start = strt, r = sCor, 
+                    bestMod = modNm, t(wts), samplingMod = sampEvo)
   out
 }
 
-mods4l <- lapply(longSpp, evoFit, dat=tsDf, sampDat=samp, spDat=spAttr, nmods = 'four') 
+mods4l <- lapply(longSpp, evoFit, dat = tsDf, 
+                 sampDat = samp, spDat = spAttr, nmods = 'four') 
+# longSpp2 <- setdiff(longSpp, 'Globigerinella calida6')
+# mods4l <- lapply(longSpp2, evoFit, dat = tsDf, method='Joint',
+#                  sampDat = samp, spDat = spAttr, nmods = 'four') 
 mods4 <- do.call('rbind', mods4l)
 
+# when G calida6 excluded, using method='Joint', SURFACE
+# GRW       Stasis StrictStasis          URW 
+# 6            8            7           10
+# IN-HABITAT, joint
+# GRW       Stasis StrictStasis          URW 
+# 2            9            8           12
 table(mods4$bestMod)
-summary(mods4$r)
+mean(mods4$r); sd(mods4$r)
 
 # Spp vs sampling evo mode ------------------------------------------------
 
@@ -192,9 +216,9 @@ bubbl <-
   scale_size(range=c(4,8))
 
 if (ss){
-  bubblNm <- paste0('Figs/evo_mode_bubble_matrix_0m_', day, '.pdf')
+  bubblNm <- paste0('Figs/evo-mode-bubble-matrix_SS_', day, '.pdf')
 } else {
-  bubblNm <- paste0('Figs/evo_mode_bubble_matrix_', day, '.pdf')
+  bubblNm <- paste0('Figs/evo-mode-bubble-matrix_hab_', day, '.pdf')
 }
 pdf(bubblNm, width=4, height=4)
 print(bubbl)
@@ -205,37 +229,29 @@ dev.off()
 # Missing sp-bin combinations have already been removed from the df object.
 # Add them back in so that the time series are plotted with gaps.
 combos <- expand.grid(spp, bins)
-colnames(combos) <- c('sp','bin')
-df <- merge(combos, df, all.x=TRUE, by=c('sp','bin'))
+colnames(combos) <- c('sp', 'bin')
+df <- merge(combos, df, all.x = TRUE, by = c('sp', 'bin'))
 spSort <- sort(spp)
-df$sp <- factor(df$sp, levels=spSort)
+df$sp <- factor(df$sp, levels = spSort)
 
-# Don't plot the species with too short of time series
-rare <- vector()
-for (s in spp){
-  hits <- grep(s, tsDf$sp)
-  if (length(hits)==0) rare <- c(rare, s)
-}
-plotBool <- df$sp %in% setdiff(spp, rare)
-plotDf <- df[plotBool,]
-
-xtick <- paste(seq(600,0,by=-200))
-xbreak <- seq(-600,0,by=200)
+xtick <- paste(seq(600, 0, by = -200))
+xbreak <- seq(-600, 0, by = 200)
 tsPlot <- 
-  ggplot(data=plotDf)+
+  ggplot(data = df)+
   theme_bw() +
-  scale_y_continuous(name='Mean annual temperature at occupied sites') +
-  scale_x_continuous(name='Time (Ka)', expand=c(0.01,0),
-                     breaks=xbreak, labels=xtick) +
-  geom_ribbon(aes(x=-bin, ymin=m-sd, ymax=m+sd), fill='grey50', alpha=.5, size=0.4) + 
-  geom_line(aes(x=-bin, y=m), size=0.5) + 
+  scale_y_continuous(name = 'Mean annual temperature at occupied sites') +
+  scale_x_continuous(name = 'Age (ka)', expand = c(0.01, 0),
+                     breaks = xbreak, labels = xtick) +
+  geom_ribbon(aes(x = -bin, ymin = m-sd, ymax = m+sd), 
+              fill = 'grey50', alpha = 0.5, size = 0.4) + 
+  geom_line(aes(x = -bin, y = m), size = 0.5) + 
   facet_wrap(~sp) +
   theme(strip.text.x = element_text(size = 6)) 
 
 if (ss){
-  tsNm <- paste0('Figs/species_time_series_0m', day, '.pdf')
+  tsNm <- paste0('Figs/species-time-series_SS_', day, '.pdf')
 } else {
-  tsNm <- paste0('Figs/species_time_series_', day, '.pdf')
+  tsNm <- paste0('Figs/species-time-series_hab_', day, '.pdf')
 }
 pdf(tsNm, width=7.5, height=8)
 print(tsPlot)
@@ -245,34 +261,36 @@ dev.off()
 
 plotL <- list()
 nlvl <- length(samp)
-lvlNms <- c(' Sea level',' Surface habitat',' Surface-subsurface habitat',' Subsurface habitat')
+lvlNms <- c(' Sea level',' Surface habitat',
+            ' Surface-subsurface habitat',' Subsurface habitat')
 for (i in 1:nlvl){
   sampPlot <- 
     ggplot(data=samp[[i]])+
     theme_bw() +
     ggtitle(lvlNms[i]) +
-    scale_y_continuous(limits = c(2.5, 27.5), expand=c(0,0)) +
-    scale_x_continuous(expand=c(0.01,0), breaks=xbreak, labels=xtick) +
-    geom_ribbon(aes(x=-bin, ymin=m-sd, ymax=m+sd), fill='grey50', alpha=.5, size=0.4) + 
-    geom_line(aes(x=-bin, y=m), size=0.5) +
+    scale_y_continuous(limits = c(2.5, 27.5), expand = c(0,0)) +
+    scale_x_continuous(expand = c(0.01,0), breaks = xbreak, labels = xtick) +
+    geom_ribbon(aes(x = -bin, ymin = m-sd, ymax = m+sd), 
+                fill = 'grey50', alpha = 0.5, size = 0.4) + 
+    geom_line(aes(x = -bin, y = m), size = 0.5) +
     theme(axis.title = element_blank())
   plotL <- append(plotL, list(sampPlot))
 }
 
 # export as compound plot
-pg <- plot_grid(plotlist=plotL, nrow=2, labels='AUTO', 
-                label_size = 14, hjust= -0.7) 
+pg <- plot_grid(plotlist = plotL, nrow = 2, labels = 'AUTO', 
+                label_size = 14, hjust = -0.7) 
 yGrob <- textGrob('Temperature at sample sites', 
-                   gp=gpar(fontface="bold"), rot=90)
-xGrob <- textGrob('Time (Ka)', 
-                   gp=gpar(fontface="bold"))
-sampNm <- paste0('Figs/sampling_time_series_by_depth_',day,'.pdf')
-pdf(sampNm, width=6, height=6)
+                  gp = gpar(fontface="bold"), rot = 90)
+xGrob <- textGrob('Age (ka)', 
+                   gp = gpar(fontface="bold"))
+sampNm <- paste0('Figs/sampling-time-series_by-depth_', day, '.pdf')
+pdf(sampNm, width = 6, height = 6)
 grid.arrange(arrangeGrob(pg, left = yGrob, bottom = xGrob))
 dev.off()
 
 # Relative model support --------------------------------------------------
-# stacked bar chart of support for each evo model, for each sequences
+# stacked bar chart of support for each evo model, for each sequence
 
 # first 3 letters of sp epithet are unique except for ruber and rubescens
 # but BEWARE if crassula and crassaformis are later both included
@@ -292,38 +310,41 @@ for (i in 1:nrow(mods4)){
 
 abrvOrdr <- order(mods4$seq)
 mods4 <- mods4[abrvOrdr,]
-modLong <- pivot_longer(mods4, cols=evoModes, names_to='model', values_to='weight')
-modLong$model <- factor(modLong$model, levels=rev(evoModes))
-modLong$seq <- factor(modLong$seq, levels=rev(unique(modLong$seq)))
+modLong <- pivot_longer(mods4, cols = all_of(evoModes), 
+                        names_to = 'model', values_to = 'weight')
+modLong$model <- factor(modLong$model, levels = rev(evoModes))
+modLong$seq <- factor(modLong$seq, levels = rev(unique(modLong$seq)))
 
-colr <- c('StrictStasis'='#283593', 'Stasis'='#5dade2', 'URW'='#FFC300', 'GRW'='#FF5733')
+colr <- c('StrictStasis'='#283593', 'Stasis'='#5dade2', 
+          'URW'='#FFC300', 'GRW'='#FF5733')
 
 bars <- 
   ggplot() +
   theme_minimal() +
   # use position=fill to indicate data as %, so rounding errors don't result in sum > 1  
-  geom_bar(data=modLong, aes(x=seq, y=weight, fill=model), 
-           position='fill', stat='identity', width=0.75) +
-  scale_x_discrete(name='Species sequence') +
-  scale_y_continuous(name='Model support (AIC weight)        ', 
-                     expand = c(0,0), limits=c(0,1.2),
-                     breaks = seq(0,1,by=0.25)) +
+  geom_bar(data = modLong, aes(x = seq, y = weight, fill = model), 
+           position = 'fill', stat = 'identity', width = 0.75) +
+  scale_x_discrete(name = 'Species sequence') +
+  scale_y_continuous(name = 'Model support (AIC weight)        ', 
+                     expand = c(0, 0), limits = c(0, 1.2),
+                     breaks = seq(0, 1, by = 0.25)) +
   theme(legend.position = 'top',
-        axis.text.x = element_text(angle=90, vjust=0.5, hjust=1),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
         panel.grid = element_blank()) +
-  scale_colour_manual(name=element_blank(), values=colr, 
-                      aesthetics='fill', limits=evoModes,
-                      labels=c('Strict stasis','Stasis','Random walk','Directional walk')) +
-  guides(fill=guide_legend(nrow=2))
+  scale_colour_manual(name = element_blank(), values = colr, 
+                      aesthetics = 'fill', limits = evoModes,
+                      labels = c('Strict stasis','Stasis','Random walk','Directional walk')) +
+  guides(fill = guide_legend(nrow = 2))
 barsFlip <- 
   bars +
-  geom_text(aes(x=seq, y=1.1, label=l), data=mods4, hjust=1, size=3.2) +
+  geom_text(aes(x = seq, y = 1.1, label = l), 
+            data = mods4, hjust = 1, size = 3.2) +
   coord_flip()
 
 if (ss){
-  barNm <- paste0('Figs/evo_model_support_barplot_0m_',day,'.pdf')
+  barNm <- paste0('Figs/evo-model-support-barplot_SS_',day,'.pdf')
 } else {
-  barNm <- paste0('Figs/evo_model_support_barplot_hab_',day,'.pdf')
+  barNm <- paste0('Figs/evo-model-support-barplot_hab_',day,'.pdf')
 }
 # the column width is 3.4252 in, but the exported plot has white space to trim
 pdf(barNm, width=3.4252+0.3, height=6)
