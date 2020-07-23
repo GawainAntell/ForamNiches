@@ -10,14 +10,14 @@ library(cowplot)
 ss <- TRUE
 
 # Data prep ---------------------------------------------------------------
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
 
-# foram data
-spAttr <- read.csv('Data/foram_spp_data_20-04-05.csv', stringsAsFactors=FALSE)
+source('species_kde_buildr.R')
+day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
+spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv')
 if (ss){
-  df <- read.csv('Data/foram_niche_sumry_metrics_0m_20-04-05.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_nrd0_SS_2020-07-22.csv')
 } else {
-  df <- read.csv('Data/foram_niche_sumry_metrics_20-04-05.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_nrd0_hab_2020-07-22.csv')
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -26,15 +26,15 @@ nbin <- length(bins)
 spp <- unique(df$sp)
 nspp <- length(spp)
 binL <- bins[1] - bins[2]
-
-# standardized sampling universe (MAT at range-through core sites) at each of 4 depths
-truncEnv <- readRDS('Data/sampled_temp_ym_truncated_by_depth_20-04-05.rds')
 envNm <- 'temp_ym'
 
+# standardized sampling universe (MAT at core sites) at each of 4 depths
+dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
+
 # mean MAT over the globe, at a standard grid of lat-long points
-glob <- read.csv('Data/global_surface_MAT_at_grid_pts_4ka.csv')
-cols <- paste0('X',bins)
-globMean <- colMeans(glob[,cols])
+glob <- read.csv('Data/global-surface-MAT_10-deg-grid_4ka.csv')
+tSteps <- paste0('X', bins)
+globMean <- colMeans(glob[, tSteps])
 
 # Scatterplot -------------------------------------------------------------
 
@@ -56,7 +56,7 @@ bybin <- data.frame(t(bybin))
 
 # mean MAT at all sampled sites in each bin:
 sampAvg <- vector(length = nbin)
-samp <- truncEnv$temp_ym_0m$samp
+samp <- dList$temp_ym_0m$samp
 for (i in 1:nbin){
   bBool <- samp$bin==bins[i]
   sampAvg[i] <- mean(samp$temp_ym[bBool])
@@ -106,7 +106,7 @@ deltaPlot <-
 
 # PNAS column width is 8.7 cm (3.4252 in)
 if (ss){
-  scatrNm <- paste0('Figs/H-vs-delta_0m_',day,'.pdf')
+  scatrNm <- paste0('Figs/H-vs-delta_SS_',day,'.pdf')
 } else {
   scatrNm <- paste0('Figs/H-vs-delta_hab_',day,'.pdf')
 }
@@ -121,10 +121,9 @@ dev.off()
 # (compared to peak vs. peak and terminus vs. terminus)
 
 # find the local max and min global MAT timing in each 100ky interval
-ints <- data.frame(yng=c(seq(0,400,by=100), 480, 560), # 690
-                   old=c(seq(100,400,by=100), 480, 560, 690) # 800
+ints <- data.frame(yng=c(seq(0, 400, by = 100), 480, 560), # 690
+                   old=c(seq(100, 400, by = 100), 480, 560, 690) # 800
 )
-#ints$maxAge <- ints$minAge <- NA
 for (r in 1:nrow(ints)){
   bounds <- ints[r,]
   inInt <- which(bins > bounds$yng & bins <= bounds$old)
@@ -168,6 +167,8 @@ globTseries <- ggplot() +
              colour = 'deepskyblue', size = 1.5) +
   geom_point(data = ints, aes(x = -maxAge, y = maxT), 
              colour = 'firebrick2', size = 1.5)
+# ignore the warning of missing points - 
+# these are the endpoints of the glacial/interglacial ages, NA in 'ints' df
 
 # Extreme comparisons -----------------------------------------------------
 
@@ -185,9 +186,9 @@ intPairs <- rbind(wc, cc, ww)
 colnames(intPairs) <- c('t1','t2','type')
 comps <- c('cold-cold','warm-warm','cold-warm')
 intPairs$type <- factor(intPairs$type, levels = comps)
-colr <- c('cold-cold'="deepskyblue",
-          'warm-warm'="firebrick2",
-          'cold-warm'="purple3")
+colr <- c('cold-cold' = 'deepskyblue',
+          'warm-warm' = 'firebrick2',
+          'cold-warm' = 'purple3')
 
 # inspect the mean delta MAT for each comparison type
 globDiff <- function(pair){
@@ -211,40 +212,40 @@ for (i in 1:nrow(intPairs)){
   pairL <- append(pairL, list(entry))
 }
 
-# source('GSA_custom_ecospat_fcns.R')
-# source('species_kde_buildr.R')
+# TIME-SAVNG OPTION:
+# if the script has already been run once, the niche summaries were exported
+# so read them in here instead of running the code chunk below
+  # if (ss){
+  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_nrd0_SS_2020-07-23.csv')
+  # } else {
+  #  kdeSum <- read.csv('Data/niche-xtreme-sumry-metrics_nrd0_hab_2020-07-23.csv')
+  # }
 
-# warning - this could take 1 - 2 hours
-# nCore <- detectCores() - 1
-# pkg <- c('pracma','GoFKernel')
-# pt1 <- proc.time()
-# registerDoParallel(nCore)
-# if (ss){
-#  kdeSum <- foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar% 
-#   kde(truncEnv[[1]], bPair, envNm)
-# } else {
-# kdeSum <- foreach(dat=truncEnv[2:4], .combine=rbind, .inorder=FALSE, .packages=pkg) %:% 
-#  foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar% 
-#  kde(dat, bPair, envNm)
-# }
-# stopImplicitCluster()
-# pt2 <- proc.time()
-# pt2-pt1
-# nas <- is.na(kdeSum$bin)
-# kdeSum <- kdeSum[!nas,]
-# if (ss){
-#  sumNm <- paste0('Data/foram_niche_xtreme_comparisons_0m_',day,'.csv')
-# } else {
-#  sumNm <- paste0('Data/foram_niche_xtreme_comparisons_hab_',day,'.csv')
-# }
-# write.csv(kdeSum, sumNm, row.names = FALSE)
-
-# if the script has already been run once, read in the intermediate products instead
+# warning - this could take an hour
+nCore <- detectCores() - 1
+bw <- 'nrd0'
+pkg <- c('pracma','GoFKernel','kerneval')
+pt1 <- proc.time()
+registerDoParallel(nCore)
 if (ss){
- kdeSum <- read.csv('Data/foram_niche_xtreme_comparisons_0m_20-04-07.csv')
+  kdeSum <- foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar%
+    kde(dList[[1]], bPair, envNm, bw=bw)
 } else {
- kdeSum <- read.csv('Data/foram_niche_xtreme_comparisons_hab_20-04-07.csv')
+  kdeSum <- foreach(dat=dList[2:4], .combine=rbind, .inorder=FALSE, .packages=pkg) %:%
+    foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar%
+    kde(dat, bPair, envNm, bw=bw)
 }
+stopImplicitCluster()
+pt2 <- proc.time()
+pt2-pt1
+nas <- is.na(kdeSum$bin)
+kdeSum <- kdeSum[!nas,]
+if (ss){
+  sumNm <- paste0('Data/niche-xtremes-sumry-metrics_',bw, '_SS_', day, '.csv')
+} else {
+  sumNm <- paste0('Data/niche-xtremes-sumry-metrics_',bw, '_hab_', day, '.csv')
+}
+write.csv(kdeSum, sumNm, row.names = FALSE)
 
 # take the mean h for each bin combination
 sumH <- function(bPair, dat){
