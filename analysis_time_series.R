@@ -268,7 +268,7 @@ for (i in 1:nlvl){
     ggplot(data=samp[[i]])+
     theme_bw() +
     ggtitle(lvlNms[i]) +
-    scale_y_continuous(limits = c(2.5, 27.5), expand = c(0,0)) +
+    scale_y_continuous(limits = c(2.5, 30), expand = c(0,0)) +
     scale_x_continuous(expand = c(0.01,0), breaks = xbreak, labels = xtick) +
     geom_ribbon(aes(x = -bin, ymin = m-sd, ymax = m+sd), 
                 fill = 'grey50', alpha = 0.5, size = 0.4) + 
