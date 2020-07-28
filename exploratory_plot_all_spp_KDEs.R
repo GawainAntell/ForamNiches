@@ -1,38 +1,39 @@
 library(ggplot2)
 library(cowplot)
+library(sp)
 library(raster)
 library(testthat)
+library(kerneval)
 
-day <- format(as.Date(date(), format="%a %b %d %H:%M:%S %Y"), format='%y-%m-%d')
+day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
+df <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
 
-df <- readRDS('Data/sampled_temp_ym_truncated_by_depth_20-04-05.rds')
-
-source('GSA_custom_ecospat_fcns.R')
-
-plotDens <- function(bin, s, xmn, xmx, sppDf, sampDf){
+plotDens <- function(bin, s, bw, xmn, xmx, sppDf, sampDf){
   # calculate w
-  sampBool <- sampDf$bin==bin
+  sampBool <- sampDf$bin == bin
   sampDat <- sampDf$temp_ym[sampBool] 
   # Feflecting the sample curve doesn't change the sp KDE much
   # except that the ends turn down a bit more (more convexity).
   # Since it's more complicated and throws warnings, don't do it.
-  densSamp <- density(sampDat, from=xmn, to=xmx) 
+  densSamp <- density(sampDat, bw = bw) # from=xmn, to=xmx 
   #  densSamp <- density.reflected(sampSlc, lower=xmn, upper=xmx) 
   w <- approxfun(densSamp$x, densSamp$y)
-  a <- min(densSamp$x)
-  b <- max(densSamp$x)
+#  a <- min(densSamp$x)
+#  b <- max(densSamp$x)
   
-  sBool <- sppDf$species==s & sppDf$bin==bin
+  sBool <- sppDf$species == s & sppDf$bin == bin
   spDat <- sppDf$temp_ym[sBool]
   # in order to plot the rug later, there must be >n discrete KDE points
   z1 <- tryCatch(
-    transformEst(spDat, w = w, bw='nrd0', reflect = FALSE, 
-                 a = a, b = b, n = 2^10),
+    transdens(spDat, w = w, bw = bw, reflect = FALSE, 
+              a = xmn, b = xmx, n = 2^10),
     error = function(err){ list() }
   ) 
   if (length(z1)==0){ next }
   
-  pe <- nichStats(z1)['pe']
+#  pa <- max(z1$y)
+#  pePos <- which.max(z1$y)
+  
   x <- z1$x
   kd <- z1$y
   x <- c(xmn, x, xmx)
@@ -42,22 +43,22 @@ plotDens <- function(bin, s, xmn, xmx, sppDf, sampDf){
   noNa <- length(x) - length(spDat)
   plotDat$rugHack <- c(spDat, rep(NA, noNa))
   sPlot <- 
-    ggplot(data=plotDat, aes(x = x, y = kd)) +
+    ggplot(data = plotDat, aes(x = x, y = kd)) +
     theme_bw() +
-    ggtitle(paste(bin, 'Ka')) +
-    geom_area(fill='lightblue1') +
+    ggtitle(paste(bin, 'ka')) +
+    geom_area(fill = 'lightblue1') +
     geom_line() +
-    geom_segment(x = pe, xend = pe, y = 0, yend = 1,
-                 colour = 'blue') +
-    geom_segment(x = mean(spDat), xend = mean(spDat), 
-                 y = 0, yend = 1, colour = 'grey20') +
+    # geom_segment(x = pe, xend = pe, y = 0, yend = 1,
+    #              colour = 'blue') +
+    # geom_segment(x = mean(spDat), xend = mean(spDat), 
+    #              y = 0, yend = 1, colour = 'grey20') +
     geom_hline(yintercept = 0) +
     geom_rug(aes(x = rugHack), colour = 'grey20',
              sides = 'b', length = unit(0.045, "npc")) + 
     # ,outside = TRUE) +
     #   coord_cartesian(clip = "off") +
     scale_x_continuous(expand = c(0, 0)) +
-    scale_y_continuous(limits = c(0, 0.08)) +
+    scale_y_continuous(limits = c(0, 0.11)) +
     theme(axis.title.x = element_blank(),
           axis.title.y = element_blank(),
           plot.title = element_text(size = 9))
@@ -114,10 +115,10 @@ for (b in c(b1, b2)){
 # Glacial/IG niches -------------------------------------------------------
 
 coldBins <- c(28, 268, 436)
-hotBins <- c(124, 332, 492)
+hotBins <- c(4, 124, 412)
 
 # pick 1 surface and 1 subsurface species as examples
-spp <- c('Globigerinoides ruber','Hirsutella scitula')
+spp <- c('Neogloboquadrina dutertrei','Hirsutella scitula')
 
 sppSurf <- df$temp_ym_surf$sp
 sampSurf <- df$temp_ym_surf$samp
@@ -126,24 +127,23 @@ sampSub <- df$temp_ym_sub$samp
 
 plotL <- list()  
 
-  #for (d in 1:2){
-  #  sppDf <- list(sppSurf, sppSub)[[d]]
-  #  sampDf <- list(sampSurf, sampSub)[[d]]
 for (s in spp){
-  if (s=='Globigerinoides ruber'){
+  if (s=='Neogloboquadrina dutertrei'){
     sppDf <- sppSurf
     sampDf <- sampSurf
+    xmn <- -1.4
+    xmx <- 27.1
   } 
   if (s=='Hirsutella scitula'){
     sppDf <- sppSub
     sampDf <- sampSub
+    xmn <- -0.8
+    xmx <- 23.8
   }
-  xmx <- max(sampDf$temp_ym)
-  xmn <- min(sampDf$temp_ym)
   
 for (bin in c(hotBins, coldBins)){
   
-  sbPlot <- plotDens(bin, s, xmn, xmx, sppDf, sampDf)
+  sbPlot <- plotDens(bin, s, 'SJ-ste', xmn, xmx, sppDf, sampDf)
   plotL <- append(plotL, list(sbPlot))
   
 }
@@ -153,7 +153,7 @@ for (bin in c(hotBins, coldBins)){
 top <- plot_grid(plotlist = plotL[1:6], ncol = 3)
 topTtl <- ggdraw() + 
   draw_label(
-    'Globigerinoides ruber',
+    'Neogloboquadrina dutertrei',
     fontface = 'bold.italic',
     x = 0, hjust = 0
   ) +
@@ -175,7 +175,7 @@ btmTtl <- ggdraw() +
     plot.margin = margin(0, 0, 0, 7)
   )
 
-kdeNm <- paste0('Figs/KDE-examples-transform-RT_',day,'.pdf')
+kdeNm <- paste0('Figs/KDE-examples-transform-SJste_',day,'.pdf')
 pdf(kdeNm, width=6, height=6)
 plot_grid(
   topTtl, top, btmTtl, btm,
@@ -185,3 +185,33 @@ plot_grid(
 )
 dev.off()
 
+# Evaluate degree of truncation -------------------------------------------
+# this chunk is moved from 'foram niche construction' on 21 July 2020
+
+# df$trunc <- 'in range'
+# tooBig <- which(df$temp_ym_0m > 27.1)
+# tooSmol <- which(df$temp_ym_0m < -1.4)
+# df$trunc[tooBig] <- 'high'
+# df$trunc[tooSmol] <- 'low'
+# 
+# # omit the most recent 2 time bins because the data are too numerous
+# # too plot on the same scale
+# mdrnBool <- df$bin %in% bins[1:2]
+# mdrn <- df[mdrnBool,]
+# table(mdrn$bin)
+# old <- df[!mdrnBool,]
+# old$trunc <- factor(old$trunc, levels = c('high','low','in range'))
+# bars <- ggplot(data = old, aes(fill = trunc, x= - bin)) + 
+#   scale_x_continuous(name='Time (Ka)', labels = c(600, 400, 200),
+#                      breaks = c(-600, -400, -200), expand = c(0.01, 0)) +
+#   scale_y_continuous(expand = c(0, 0), limits = c(0, 580)) +
+#   theme_bw() +
+#   geom_bar(position="stack", width = 5) +
+#   scale_fill_manual(name='MAT value in relation to cutoffs', 
+#                     values=c('plum','gold','grey20')) +
+#   theme(legend.position = 'top')
+# 
+# barNm <- paste0('Figs/truncated-data-sample-size_bars_',day,'.pdf')
+# pdf(barNm, width=6, height=4)
+# print(bars)
+# dev.off()
