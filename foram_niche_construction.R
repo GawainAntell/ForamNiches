@@ -4,8 +4,6 @@ library(parallel)
 library(foreach)
 library(iterators)
 library(doParallel)
-library(ggplot2)
-library(tidyr)
 
 # Data prep ---------------------------------------------------------------
 
@@ -39,8 +37,8 @@ registerDoParallel(nCore)
 kdeSum <- foreach(dat=dList[2:4], .combine=rbind, .inorder=FALSE, .packages=pkg) %:%
   foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar%
    kde(dat, bPair, envNm, bw = bw)
-# kdeSumSS <- foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar% 
-#   kde(dList[[1]], bPair, envNm, bw = bw)
+kdeSumSS <- foreach(bPair=pairL, .combine=rbind, .inorder=FALSE, .packages=pkg) %dopar%
+  kde(dList[[1]], bPair, envNm, bw = bw)
 stopImplicitCluster()
 pt2 <- proc.time()
 pt2-pt1
