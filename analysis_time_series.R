@@ -14,9 +14,9 @@ day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 # foram data
 spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv', stringsAsFactors=FALSE)
 if (ss){
-  df <- read.csv('Data/niche-sumry-metrics_nrd0_SS_2020-07-22.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-07-24.csv', stringsAsFactors=FALSE)
 } else {
-  df <- read.csv('Data/niche-sumry-metrics_nrd0_hab_2020-07-22.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-07-24.csv', stringsAsFactors=FALSE)
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -183,6 +183,10 @@ mods4 <- do.call('rbind', mods4l)
 # GRW       Stasis StrictStasis          URW 
 # 2            9            8           12
 table(mods4$bestMod)
+table(mods4$samplingMod)
+# when G calida6 excluded, using method='Joint', SURFACE
+# GRW StrictStasis          URW 
+# 1            7           23 
 mean(mods4$r); sd(mods4$r)
 
 # Spp vs sampling evo mode ------------------------------------------------
@@ -278,16 +282,18 @@ for (i in 1:nlvl){
 }
 
 # export as compound plot
-pg <- plot_grid(plotlist = plotL, nrow = 2, labels = 'AUTO', 
-                label_size = 14, hjust = -0.7) 
-yGrob <- textGrob('Temperature at sample sites', 
-                  gp = gpar(fontface="bold"), rot = 90)
-xGrob <- textGrob('Age (ka)', 
-                   gp = gpar(fontface="bold"))
-sampNm <- paste0('Figs/sampling-time-series_by-depth_', day, '.pdf')
-pdf(sampNm, width = 6, height = 6)
-grid.arrange(arrangeGrob(pg, left = yGrob, bottom = xGrob))
-dev.off()
+if (ss){
+  pg <- plot_grid(plotlist = plotL, nrow = 2, labels = 'AUTO', 
+                  label_size = 14, hjust = -0.7) 
+  yGrob <- textGrob('Temperature at sample sites', 
+                    gp = gpar(fontface="bold"), rot = 90)
+  xGrob <- textGrob('Age (ka)', 
+                     gp = gpar(fontface="bold"))
+  sampNm <- paste0('Figs/sampling-time-series_by-depth_', day, '.pdf')
+  pdf(sampNm, width = 6, height = 6)
+  grid.arrange(arrangeGrob(pg, left = yGrob, bottom = xGrob))
+  dev.off()
+}
 
 # Relative model support --------------------------------------------------
 # stacked bar chart of support for each evo model, for each sequence
