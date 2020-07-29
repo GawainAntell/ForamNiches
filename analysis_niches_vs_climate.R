@@ -15,9 +15,9 @@ source('species_kde_buildr.R')
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv')
 if (ss){
-  df <- read.csv('Data/niche-sumry-metrics_nrd0_SS_2020-07-22.csv')
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-07-24.csv')
 } else {
-  df <- read.csv('Data/niche-sumry-metrics_nrd0_hab_2020-07-22.csv')
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-07-24.csv')
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -35,6 +35,11 @@ dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
 glob <- read.csv('Data/global-surface-MAT_10-deg-grid_4ka.csv')
 tSteps <- paste0('X', bins)
 globMean <- colMeans(glob[, tSteps])
+
+# note the correlation between sample size and bw, for methods
+cor.test(df$bw1, df$n1)
+old <- df$bin > 12
+cor.test(df$bw1[old], df$n1[old])
 
 # Scatterplot -------------------------------------------------------------
 
@@ -61,7 +66,8 @@ for (i in 1:nbin){
   bBool <- samp$bin==bins[i]
   sampAvg[i] <- mean(samp$temp_ym[bBool])
 }
-# cor(globMean, sampAvg)
+# cor(globMean, sampAvg) 
+# > [1] 0.7734369
 
 # all H values are NA at most recent time step
 Hseq <- bybin[-nrow(bybin),]
@@ -84,19 +90,30 @@ lmH <- lm(resid ~ absDelta)
 acf(lmH$residuals)
 cor.test(resid, absDelta, method='pear')
 
+# overplot the most recent boundary crossing in red
+redBool <- Hseq$bin == 12
+red <- Hseq[redBool,]
+
 xmx <- max(Hseq$absDelta) * 1.1
+# ymx <- max(Hseq$upr.75.) * 1.1
 deltaPlot <- 
   ggplot(data=Hseq, aes(x=absDelta, y=h)) +
   theme_bw() +
   scale_y_continuous('Intraspecific niche H distance', 
-                     limits=c(0, 0.52), expand=c(0, 0)) +
+                     limits=c(0, 0.35), expand=c(0, 0)) +
   scale_x_continuous('Magnitude of change in available MAT (C)',
                      limits = c(0, xmx), expand = c(0, 0)) +
   geom_errorbar(aes(ymin = lwr.25., ymax = upr.75.),
                 size = 0.5, colour = 'grey40', alpha=0.5) +
-  geom_point()
+  geom_point() 
 # horizontal error bars don't really make sense -
-# how to get these for the absolute difference of mean sample MAT?
+# how would one get these for the absolute difference of mean sample MAT?
+
+finPlot <- deltaPlot + 
+  geom_errorbar(data = red, size = 0.75, colour = 'red',
+                aes(ymin = lwr.25., ymax = upr.75.)
+                ) +
+  geom_point(data = red, colour = 'red', size = 2)
 
 # optional: annotate plot with correlation coefficient
   # scatrCor <- cor(resid, absDelta, method='pear')
@@ -111,7 +128,7 @@ if (ss){
   scatrNm <- paste0('Figs/H-vs-delta_hab_',day,'.pdf')
 }
 pdf(scatrNm, width=3.5, height=3.5)
-print(deltaPlot)
+print(finPlot)
 dev.off()
 
 # Global time series ------------------------------------------------------
@@ -136,9 +153,6 @@ for (r in 1:nrow(ints)){
     c(minAge, maxAge, range(globMean[inInt]))
 }
 
-ints$minAge[nrow(ints)] <- NA
-ints$maxAge[1] <- NA
-
 # table of glacial max and interglacial peaks
 
 # Lisiecki and Raymo 2005 ages of interglacial onset:
@@ -151,7 +165,7 @@ if (ss){
 }
 
 # plot time series of global MAT
-globDat <- data.frame(bins, globMean) # ,sampAvg)
+globDat <- data.frame(bins, globMean, sampAvg)
 globTseries <- ggplot() +
   theme_bw() +
   scale_y_continuous('Global MAT (C)') +
@@ -159,27 +173,28 @@ globTseries <- ggplot() +
                      limits = c(-701, 1), breaks = seq(-700, 0, by = 100),
                      labels = paste(seq(700, 0, by = -100))) +
   geom_line(data = globDat, aes(x = -bins, y = globMean)) +
-#  geom_line(data=globDat, aes(x=-bins, y=sampAvg),
-#            linetype='dashed') 
   geom_point(data = globDat, aes(x = -bins, y = globMean),
              size = 1) +
   geom_point(data = ints, aes(x = -minAge, y = minT), 
              colour = 'deepskyblue', size = 1.5) +
   geom_point(data = ints, aes(x = -maxAge, y = maxT), 
              colour = 'firebrick2', size = 1.5)
-# ignore the warning of missing points - 
-# these are the endpoints of the glacial/interglacial ages, NA in 'ints' df
+
+# overplot the sampling time series for supplemental figure
+globVsSamp <- globTseries +
+  geom_line(data = globDat, aes(x = -bins, y = sampAvg),
+            linetype = 'dashed')
 
 # Extreme comparisons -----------------------------------------------------
 
 # prepare a framework of every pairwise comparison to compute
 # (every warm vs. cold, warm vs. warm, and cold vs. cold interval)
-wc <- expand.grid(X1=ints$minAge[-nrow(ints)], X2=ints$maxAge[-1])
+wc <- expand.grid(X1=ints$minAge, X2=ints$maxAge)
 wc$type <- 'cold-warm'
-cc <- combn(ints$minAge[-nrow(ints)], 2)
+cc <- combn(ints$minAge, 2)
 cc <- data.frame(t(cc))
 cc$type <- 'cold-cold'
-ww <- combn(ints$maxAge[-1], 2)
+ww <- combn(ints$maxAge, 2)
 ww <- data.frame(t(ww))
 ww$type <- 'warm-warm'
 intPairs <- rbind(wc, cc, ww) 
@@ -218,12 +233,12 @@ for (i in 1:nrow(intPairs)){
   # if (ss){
   #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_nrd0_SS_2020-07-23.csv')
   # } else {
-  #  kdeSum <- read.csv('Data/niche-xtreme-sumry-metrics_nrd0_hab_2020-07-23.csv')
+  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_nrd0_hab_2020-07-23.csv')
   # }
 
 # warning - this could take an hour
 nCore <- detectCores() - 1
-bw <- 'nrd0'
+bw <- 'SJ-ste'
 pkg <- c('pracma','GoFKernel','kerneval')
 pt1 <- proc.time()
 registerDoParallel(nCore)
@@ -258,11 +273,10 @@ Hlist <- lapply(pairL, sumH, dat=kdeSum)
 Hdf <- do.call(rbind, Hlist)
 
 intPairs <- merge(intPairs, Hdf)
-#mxH <- max(intPairs$avgH) * 1.1
 ovpBoxs <- ggplot(data=intPairs) +
   theme_bw() +
   scale_y_continuous(name = 'Intraspecific niche H distance',
-                     limits=c(0, 0.52), expand=c(0,0)) +
+                     limits=c(0, 0.4), expand=c(0,0)) +
   geom_boxplot(aes(x=type, y=avgH, fill=type)) +
   scale_fill_manual(values=colr) +
   theme(legend.position='none',
