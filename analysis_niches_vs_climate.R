@@ -231,9 +231,9 @@ for (i in 1:nrow(intPairs)){
 # if the script has already been run once, the niche summaries were exported
 # so read them in here instead of running the code chunk below
   # if (ss){
-  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_nrd0_SS_2020-07-23.csv')
+  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_SJ-ste_SS_2020-07-29.csv')
   # } else {
-  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_nrd0_hab_2020-07-23.csv')
+  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_SJ-ste_hab_2020-07-29.csv')
   # }
 
 # warning - this could take an hour
@@ -273,14 +273,20 @@ Hlist <- lapply(pairL, sumH, dat=kdeSum)
 Hdf <- do.call(rbind, Hlist)
 
 intPairs <- merge(intPairs, Hdf)
+# ymx <- max(intPairs$avgH) * 1.1
 ovpBoxs <- ggplot(data=intPairs) +
   theme_bw() +
   scale_y_continuous(name = 'Intraspecific niche H distance',
-                     limits=c(0, 0.4), expand=c(0,0)) +
+                     limits=c(0, 0.5), expand=c(0,0)) +
   geom_boxplot(aes(x=type, y=avgH, fill=type)) +
   scale_fill_manual(values=colr) +
   theme(legend.position='none',
         axis.title.x = element_blank())
+
+# anova(aov(intPairs$avgH ~ intPairs$type))
+  # Response: intPairs$avgH
+  #                Df Sum Sq   Mean Sq F value Pr(>F)
+  # intPairs$type  2 0.01456 0.0072784  1.6149 0.2048
 
 # Multipanel plots --------------------------------------------------------
 
@@ -303,10 +309,47 @@ if (ss){
   print(mlti)
   dev.off()
   
+  # supplemental figure, time series with extra data
+  suppNm <- paste0('Figs/global-vs-sampling_time-series_',day,'.pdf')
+  pdf(suppNm, width = 4.5, height = 3.5)
+  globVsSamp
+  dev.off()
+  
 } else {
   # make supplemental figure: panel B only
   panelsNm <- paste0('Figs/H-vs-climate-extreme_SI_',day,'.pdf')
-  pdf(panelsNm, width=3.5, height=3.5)
+  pdf(panelsNm, width = 3.5, height = 3.5)
   print(ovpBoxs)
   dev.off()
 }
+
+# Exclude youngest cycle --------------------------------------------------
+
+cycle1rows <- union(which(intPairs$t1 == 4 | intPairs$t1 == 28),
+                    which(intPairs$t2 == 4 | intPairs$t2 == 28)
+                    )
+ints6cycle <- intPairs[-cycle1rows,]
+
+supBoxs <- ggplot(data = ints6cycle) +
+  theme_bw() +
+  scale_y_continuous(name = 'Intraspecific niche H distance',
+                     limits=c(0, 0.5), expand=c(0,0)) +
+  geom_boxplot(aes(x=type, y=avgH, fill=type)) +
+  scale_fill_manual(values=colr) +
+  theme(legend.position='none',
+        axis.title.x = element_blank())
+
+if (ss){
+  supBoxNm <- paste0('Figs/H-vs-climate-extreme_6-cycles_',day,'.pdf')
+  pdf(supBoxNm, width = 3.5, height = 3.5)
+  print(supBoxs)
+  dev.off()
+}
+
+# which 2 bin pairs are the upper outliers?
+ordr <- order(ints6cycle$avgH, decreasing = TRUE)
+ints6cycle <- ints6cycle[ordr,]
+ints6cycle[1:2,]
+# t1  t2      type deltaMAT      avgH
+# 91 668 588 cold-warm 2.363016 0.3478263
+# 87 668 332 cold-warm 2.523903 0.3430621
