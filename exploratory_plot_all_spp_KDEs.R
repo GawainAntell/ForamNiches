@@ -186,32 +186,11 @@ plot_grid(
 dev.off()
 
 # Evaluate degree of truncation -------------------------------------------
-# this chunk is moved from 'foram niche construction' on 21 July 2020
 
-# df$trunc <- 'in range'
-# tooBig <- which(df$temp_ym_0m > 27.1)
-# tooSmol <- which(df$temp_ym_0m < -1.4)
-# df$trunc[tooBig] <- 'high'
-# df$trunc[tooSmol] <- 'low'
-# 
-# # omit the most recent 2 time bins because the data are too numerous
-# # too plot on the same scale
-# mdrnBool <- df$bin %in% bins[1:2]
-# mdrn <- df[mdrnBool,]
-# table(mdrn$bin)
-# old <- df[!mdrnBool,]
-# old$trunc <- factor(old$trunc, levels = c('high','low','in range'))
-# bars <- ggplot(data = old, aes(fill = trunc, x= - bin)) + 
-#   scale_x_continuous(name='Time (Ka)', labels = c(600, 400, 200),
-#                      breaks = c(-600, -400, -200), expand = c(0.01, 0)) +
-#   scale_y_continuous(expand = c(0, 0), limits = c(0, 580)) +
-#   theme_bw() +
-#   geom_bar(position="stack", width = 5) +
-#   scale_fill_manual(name='MAT value in relation to cutoffs', 
-#                     values=c('plum','gold','grey20')) +
-#   theme(legend.position = 'top')
-# 
-# barNm <- paste0('Figs/truncated-data-sample-size_bars_',day,'.pdf')
-# pdf(barNm, width=6, height=4)
-# print(bars)
-# dev.off()
+ss <- df$temp_ym_0m$sp
+ss$trunc <- 'in range'
+tooBig <- which(ss$temp_ym > 27.1)
+tooSmol <- which(ss$temp_ym < -1.4)
+ss$trunc[tooBig] <- 'high'
+ss$trunc[tooSmol] <- 'low'
+table(ss$trunc)/nrow(ss)
