@@ -133,13 +133,9 @@ dev.off()
 
 # Global time series ------------------------------------------------------
 
-# contrast the niche overlap between extreme situations:
-# glaciation peak and terminus, for 8 cycles
-# (compared to peak vs. peak and terminus vs. terminus)
-
 # find the local max and min global MAT timing in each 100ky interval
-ints <- data.frame(yng=c(seq(0, 400, by = 100), 480, 560), # 690
-                   old=c(seq(100, 400, by = 100), 480, 560, 690) # 800
+ints <- data.frame(yng = c(seq(0, 400, by = 100), 480, 560), # 690
+                   old = c(seq(100, 400, by = 100), 480, 560, 690) # 800
 )
 for (r in 1:nrow(ints)){
   bounds <- ints[r,]
@@ -153,15 +149,15 @@ for (r in 1:nrow(ints)){
     c(minAge, maxAge, range(globMean[inInt]))
 }
 
-# table of glacial max and interglacial peaks
-
 # Lisiecki and Raymo 2005 ages of interglacial onset:
 ig <- c(14, 130, 243, 337, 424, 533, 621)
-out <- data.frame(glacialMax=ints$minAge, igPeak=ints$maxAge, igOnset=ig)
-outx <- xtable(out, align=rep('r', ncol(out)+1), digits=0)
+
+# export table of glacial max and interglacial peaks
+out <- data.frame(glacialMax = ints$minAge, igPeak = ints$maxAge, igOnset = ig)
+outx <- xtable(out, align = rep('r', ncol(out)+1), digits = 0)
 tblNm <- paste0('Figs/glacial-interglacial-ages_',day,'.tex')
 if (ss){
-  print(outx, file=tblNm, include.rownames=FALSE)
+  print(outx, file = tblNm, include.rownames = FALSE)
 }
 
 # plot time series of global MAT
@@ -189,7 +185,8 @@ globVsSamp <- globTseries +
 
 # prepare a framework of every pairwise comparison to compute
 # (every warm vs. cold, warm vs. warm, and cold vs. cold interval)
-wc <- expand.grid(X1=ints$minAge, X2=ints$maxAge)
+wc <- expand.grid(X1 = ints$minAge, 
+                  X2 = ints$maxAge)
 wc$type <- 'cold-warm'
 cc <- combn(ints$minAge, 2)
 cc <- data.frame(t(cc))
@@ -264,26 +261,26 @@ write.csv(kdeSum, sumNm, row.names = FALSE)
 
 # take the mean h for each bin combination
 sumH <- function(bPair, dat){
-  intBool <- which(dat$bin==bPair[1] & dat$bin2==bPair[2])
+  intBool <- which(dat$bin == bPair[1] & dat$bin2 == bPair[2])
   int <- dat[intBool,]
-  avgH <- mean(int$h, na.rm=TRUE)
-  data.frame(t1=bPair[1], t2=bPair[2], avgH)
+  avgH <- mean(int$h, na.rm = TRUE)
+  data.frame(t1 = bPair[1], t2 = bPair[2], avgH)
 }
-Hlist <- lapply(pairL, sumH, dat=kdeSum)
+Hlist <- lapply(pairL, sumH, dat = kdeSum)
 Hdf <- do.call(rbind, Hlist)
 
 intPairs <- merge(intPairs, Hdf)
 # ymx <- max(intPairs$avgH) * 1.1
-ovpBoxs <- ggplot(data=intPairs) +
+ovpBoxs <- ggplot(data = intPairs) +
   theme_bw() +
   scale_y_continuous(name = 'Intraspecific niche H distance',
-                     limits=c(0, 0.5), expand=c(0,0)) +
-  geom_boxplot(aes(x=type, y=avgH, fill=type)) +
-  scale_fill_manual(values=colr) +
-  theme(legend.position='none',
+                     limits = c(0, 0.5), expand = c(0, 0)) +
+  geom_boxplot(aes(x = type, y = avgH, fill = type)) +
+  scale_fill_manual(values = colr) +
+  theme(legend.position = 'none',
         axis.title.x = element_blank())
 
-# anova(aov(intPairs$avgH ~ intPairs$type))
+# anova(aov(intPairs$avgH ~ intPairs$type)) # SS
   # Response: intPairs$avgH
   #                Df Sum Sq   Mean Sq F value Pr(>F)
   # intPairs$type  2 0.01456 0.0072784  1.6149 0.2048
@@ -323,12 +320,23 @@ if (ss){
   dev.off()
 }
 
-# Exclude youngest cycle --------------------------------------------------
+# Exclude oldest/youngest extremes ----------------------------------------
 
-cycle1rows <- union(which(intPairs$t1 == 4 | intPairs$t1 == 28),
-                    which(intPairs$t2 == 4 | intPairs$t2 == 28)
-                    )
-ints6cycle <- intPairs[-cycle1rows,]
+# inspect mean per-species sample size in each bin
+getN <- function(b){
+  binBool <- df$bin == b
+  nVect <- df$n1[binBool]
+  n <- mean(nVect)
+  names(n) <- b
+  n
+}
+sapply(ints$minAge, getN)
+sapply(ints$maxAge, getN)
+
+tossRows <- union(which(intPairs$t1 == 4 | intPairs$t1 == 668), 
+                  which(intPairs$t2 == 4 | intPairs$t2 == 668)  
+                  )
+ints6cycle <- intPairs[-tossRows,]
 
 supBoxs <- ggplot(data = ints6cycle) +
   theme_bw() +
@@ -345,11 +353,3 @@ if (ss){
   print(supBoxs)
   dev.off()
 }
-
-# which 2 bin pairs are the upper outliers?
-ordr <- order(ints6cycle$avgH, decreasing = TRUE)
-ints6cycle <- ints6cycle[ordr,]
-ints6cycle[1:2,]
-# t1  t2      type deltaMAT      avgH
-# 91 668 588 cold-warm 2.363016 0.3478263
-# 87 668 332 cold-warm 2.523903 0.3430621
