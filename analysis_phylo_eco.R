@@ -4,6 +4,8 @@ library(ape)
 library(geiger)
 library(nlme)
 library(xtable)
+library(picante)
+library(RColorBrewer)
 
 ss <- TRUE
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
@@ -12,11 +14,8 @@ day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 
 spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv')
 if (ss){
-  # using RT bandwidth gives lambda = 0; SJ, 1
- # df <- read.csv('Data/niche-sumry-metrics_nrd0_SS_2020-07-22.csv')
   df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-07-24.csv')
 } else {
- #  df <- read.csv('Data/niche-sumry-metrics_nrd0_hab_2020-07-22.csv')
   df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-07-24.csv')
 }
 ordr <- order(df$bin, decreasing = TRUE)
@@ -69,16 +68,16 @@ cleanAMb$tip.label <- foramAMb$Species_name[rowOrdr]
 # Summarise H for each species --------------------------------------------
 
 spSmry <- function(s, dat){
-  sBool <- dat$sp==s
+  sBool <- dat$sp == s
   sDf <- dat[sBool,]
   numCol <- ! colnames(dat) %in% c('bin','sp')
-  out <- apply(sDf[,numCol], 2, mean, na.rm=TRUE)
+  out <- apply(sDf[,numCol], 2, mean, na.rm = TRUE)
   out <- data.frame(t(out))
   out$nInt <- nrow(sDf)
   out$species <- s
   out
 }
-spL <- lapply(spp, spSmry, dat=df)
+spL <- lapply(spp, spSmry, dat = df)
 spDf <- do.call(rbind, spL)
 
 # Combine with species attribute data
@@ -94,27 +93,32 @@ ecoLbl <- c('Thermocline','Mix layer symbiotic','Mix layer heterotroph',
 # 4 = open ocean, sub-thermocline
 # 5 = high lat
 # 6 = upwelling/high productivity
+code2habitat <- function(x){
+  switch(paste(x), 
+         '1' = 'Mix layer symbiotic', 
+         '2' = 'Mix layer heterotroph', 
+         '3' = 'Thermocline', 
+         '4' = 'Subthermocline', 
+         '5' = 'High latitude', 
+         'NA' = '-')
+} 
+spDf$ecoNm <- sapply(spDf$eco, code2habitat)
 
 # Supplemental table ------------------------------------------------------
 
 alph <- order(spDf$species)
-cols2export <- c('species','eco','ecoRef','DepthHabitat','ref','h','pe')
+cols2export <- c('species','ecoNm','ecoRef','DepthHabitat','ref','h','pe')
 tbl <- spDf[alph,cols2export]
 
 tbl$ecoRef <- gsub('\\(','',tbl$ecoRef)
 tbl$ecoRef <- gsub(')','',tbl$ecoRef)
 tbl$ecoRef <- gsub('&','and',tbl$ecoRef)
 tbl$ecoRef <- gsub(';',',',tbl$ecoRef)
-tbl$ecoRef <- gsub('This study','Fenton et al. in prep',tbl$ecoRef)
+tbl$ecoRef <- gsub('This study','Aze et al. 2011',tbl$ecoRef)
 tbl$ecoRef <- gsub('2001b','2001',tbl$ecoRef)
 tbl$ecoRef <- gsub('1981.','1981',tbl$ecoRef)
 
 tbl$DepthHabitat <- gsub('Surface.subsurface','Surface-subsurf',tbl$DepthHabitat)
-code2habitat <- function(x){
-  switch(paste(x), '1' = 'Mix layer symbiotic', '2' = 'Mix layer heterotroph', 
-         '3' = 'Thermocline', '4' = 'Subthermocline', '5' = 'High latitude', 'NA' = '-')
-} 
-tbl$eco <- sapply(tbl$eco, code2habitat)
 
 tbl$h <- sprintf('%.2f', round(tbl$h, 2))
 tbl$pe <- sprintf('%.1f', round(tbl$pe, 1))
@@ -142,11 +146,19 @@ trTrim <- drop.tip(cleanAMb, toss$tree_not_data)
 #  dropPaleoTip(treeAMb, toss$tree_not_data)
 name.check(trTrim, spDf$species, data.names = spDf$species)
 
-# TODO consider exporting as a supplemental figure
-plot(trTrim, main ='timetreeAMb', show.tip.label = T)
+# export as a supplemental figure
+if (ss){
+  spDf$ecoNm <- factor(spDf$ecoNm)
+  clrs <- brewer.pal(5, 'Set1') 
+  pNm <- paste0('Figs/phylo-with-traits_',day,'.pdf')
+  pdf(pNm, width = 7.5, height = 7.5)
+  color.plot.phylo(trTrim, df = spDf, trait = 'ecoNm', taxa.names = 'species', 
+                   main = '', leg.title = 'Ecotype', col.names = clrs)
+  dev.off()
+}
 
+# estimate Pagel's lambda
 # use nlme method - caper oddly drops 8 tree tips
-
 pgl <- corPagel(1, form = ~ species, trTrim)
 pglMod <- gls(h ~ eco, data = spDf, correlation = pgl)
 summary(pglMod)
