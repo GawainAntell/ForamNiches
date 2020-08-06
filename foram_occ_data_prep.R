@@ -7,12 +7,14 @@ library(doParallel)
 
 # Data import -------------------------------------------------------------
 
-tRes <- 8 # resolution in kilo anna
+# put a date stamp on exported files
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
+
+# define the study resolution in kilo anna
+tRes <- 8 
 
 # raster at the resolution of GCM data (1.25 degrees)
 rEmpt <- raster(ncols=288, nrows=144, xmn=-180, xmx=180, ymn=-90, ymx=90)
-llPrj <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
 
 # Read in occurrence data
 occ <- read.csv('Data/foram_data_800ka_IF191204.csv', stringsAsFactors=FALSE)
@@ -327,8 +329,8 @@ for (r in 1:nrow(occ)){
 # Rasterize to the resolution of GCM data
 pts <- SpatialPointsDataFrame(occ[, coordCols], data = occ, 
                               proj4string = crs('+init=epsg:4326'))
-occ$cell_number <- cellFromXY(rEmpt, pts) 
-occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
+occ$cell <- cellFromXY(rEmpt, pts) 
+occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell)
 
 # Shorten to unique occs --------------------------------------------------
 # subset by bin, then species, then find unique species-cells combinations
@@ -336,7 +338,7 @@ occ[,c('centroid_long', 'centroid_lat')] <- xyFromCell(rEmpt, occ$cell_number)
 # omit duplicate cell-species combinations
 slcSpSmry <- function(dat, sp){
   spSlc <- dat[dat$species==sp,] 
-  dupes <- duplicated(spSlc$cell_number)
+  dupes <- duplicated(spSlc$cell)
   spSlc[!dupes,]
 }
 
@@ -387,8 +389,7 @@ envNm <- 'ann_temp_ym_dpth'
 envNmShort <-  paste(strsplit(envNm,'_')[[1]][2:3], collapse='_')
 allEnvNm <- paste(envNmShort, c('0m','surf','surfsub','sub'), sep='_')
 
-addEnv <- function(bin, dat, mods, binCol, cellCol, prj, 
-                   env, envCols, dpths){
+addEnv <- function(bin, dat, mods, binCol, cellCol, env, envCols, dpths){
   slcBool <- dat[,binCol] == bin
   slc <- dat[slcBool,]
   slcCells <- slc[,cellCol]
@@ -415,11 +416,18 @@ addEnv <- function(bin, dat, mods, binCol, cellCol, prj,
 pkgs <- c('sp','raster') 
 registerDoParallel(nCore)
 sppEnv <- foreach(bin=bins, .packages=pkgs, .combine=rbind, .inorder=FALSE) %dopar%
-  addEnv(bin = bin, dat = df, mods = modId, binCol = 'bin', cellCol = 'cell_number', 
-         prj = llPrj, env = envNm, envCols = allEnvNm, dpths = dpths)
+  addEnv(bin = bin, dat = df, mods = modId, binCol = 'bin', cellCol = 'cell', 
+         env = envNm, envCols = allEnvNm, dpths = dpths)
 stopImplicitCluster()
 
 # Clean spp data ----------------------------------------------------------
+
+# count how many species are present before sample size vetting
+length(unique(sppEnv$species))
+# [1] 134
+not4 <- (sppEnv$bin != 4)
+length(unique(sppEnv$species[not4]))
+# [1] 107
 
 # remove 199 records where environment is unknown
 naRows <- apply(sppEnv[,allEnvNm], 1, 
@@ -433,7 +441,7 @@ sppEnv <- sppEnv[trimBool,]
 bins <- bins[bins <= 700]
 
 # reduce size for later computation
-sppEnv <- sppEnv[,c('species', 'bin', allEnvNm)] # 'cell_number','coreUniq',
+sppEnv <- sppEnv[,c('species', 'bin', allEnvNm, 'cell')] # ,'coreUniq'
 
 # retain only species with at least 6 occs per bin
 for (b in bins){
@@ -467,6 +475,14 @@ for (s in abundSpp){
 keepLong <- sppEnv$species %in% longSpp
 sppEnv <- sppEnv[keepLong,]
 
+# report how many occurrences are from only 4 ka or 12 ka
+nrow(sppEnv)
+# [1] 42233
+sum(sppEnv$bin == 4)
+# [1] 19711
+sum(sppEnv$bin == 12)
+# [1] 2079
+
 # Combine enviro and core data --------------------------------------------
 
 # read in modified function to reconstruct paleo-coordinates
@@ -489,8 +505,8 @@ envSamplr <- function(b){
   slc[naPts, coordCols] <- slc[naPts, c('long','lat')]
   
   # convert (paleo) lat-long to cell numbers, to shorten data to unique cells
-  pts <- SpatialPointsDataFrame(slc[, coordCols], 
-                                data = slc, proj4string = CRS(llPrj))
+  pts <- SpatialPointsDataFrame(slc[, coordCols], data = slc, 
+                                proj4string = crs('+init=epsg:4326'))
   slc$cell <- cellFromXY(rEmpt, pts) 
   
   dupeCell <- duplicated(slc$cell)
@@ -525,10 +541,10 @@ envSamplr <- function(b){
   # palCoords <- pal.coord(slc, 'MATTHEWS2016', Ma = b/1000)
   # slc$pal.long <- palCoords$paleolng
   # slc$pal.lat  <- palCoords$paleolat
-  # mdrn <- SpatialPointsDataFrame(slc[, c('long','lat')], 
-  #                               data = slc, proj4string = CRS(llPrj))
-  # old  <- SpatialPointsDataFrame(slc[, coordCols], 
-  #                               data = slc, proj4string = CRS(llPrj))
+  # mdrn <- SpatialPointsDataFrame(slc[, c('long','lat')], data = slc, 
+  #                                proj4string = crs('+init=epsg:4326'))
+  # old  <- SpatialPointsDataFrame(slc[, coordCols], data = slc, 
+  #                                proj4string = crs('+init=epsg:4326'))
   # dists <- pointDistance(mdrn, old, longlat=TRUE)
   # mean(dists)/1000
   # > [1] 26.28166
@@ -554,7 +570,7 @@ sampEnv <- data.frame(sampMat)
 # not between species vs sampling data. Therefore, the code chunk below
 # combines the two sets of data into one list object, with 4 sublists.
 # Each (sub)list contains a species-level and all-sampling-site dataframe
-# for a given habitat depth. The total list is saved as an rds file.
+# for a given habitat depth. The overall list is saved as an rds file.
 
 # Convert an environmental variable name to habitat name
 e2zone <- function(txt){ 
@@ -574,9 +590,9 @@ splittr <- function(e){
   zoneDf <- sppEnv[zoneDfPos,]
   
   # retain the columns necessary and sufficient for KDE
-  zoneDf <- zoneDf[, c('species', 'bin', e)]
+  zoneDf <- zoneDf[, c('species', 'bin', e, 'cell')]
   colnames(zoneDf)[3] <- envNmShort
-  sampE <- sampEnv[, c('bin', e)]
+  sampE <- sampEnv[, c('bin', e, 'cell')]
   colnames(sampE)[2] <- envNmShort
   
   list(sp = zoneDf, samp = sampE)
@@ -584,7 +600,9 @@ splittr <- function(e){
 
 cbn <- lapply(allEnvNm, splittr)
 names(cbn) <- allEnvNm
-nrow(sppEnv) # number of unique bin-cell-species occurrences
-length(unique(sppEnv$species)) # number of species for analysis
+nrow(sppEnv) 
+# > [1] 42233  # number of unique bin-cell-species occurrences
+length(unique(sppEnv$species)) 
+# > [1] 24     # number of species for analysis
 cbnNm <- paste0('Data/spp-and-sampling-data_list-by-depth_',day,'.rds')
 saveRDS(cbn, cbnNm)
