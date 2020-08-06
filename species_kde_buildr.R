@@ -9,7 +9,7 @@ nichStats <- function(dens){
 }
 
 # Output 1 sp's niche overlap (though time), peak abundance, & preferred enviro
-nicher <- function(dat, b1, b2, s, env, xmn, xmx,
+nicher <- function(dat, b1, b2, s, envNm, xmn, xmx,
                    w1 = NULL, w2 = NULL, reflect = FALSE, ...){
   
   sp1rows <- which(dat$sp$species == s & dat$sp$bin == b1)
@@ -47,15 +47,15 @@ nicher <- function(dat, b1, b2, s, env, xmn, xmx,
 }
 
 # find the temperature thresholds for a given depth zone
-minmax <- function(df, b, env){ 
+minmax <- function(df, b, envNm){ 
   bBool <- df[,'bin'] == b
   slc <- df[bBool,]
-  range(slc[,env])
+  range(slc[,envNm])
 }
 
 kde <- function(dat, bPair, envNm, bw = 'nrd0'){
   # determine the standard axis limits for the depth habitat
-  sampSmry <- sapply(bins, minmax, df=dat$samp, env=envNm)
+  sampSmry <- sapply(bins, minmax, df=dat$samp, envNm=envNm)
   xmx <- min(sampSmry[2,])
   xmn <- max(sampSmry[1,])
   
@@ -83,8 +83,8 @@ kde <- function(dat, bPair, envNm, bw = 'nrd0'){
   
   zoneSp <- unique(dat$sp$species)
   sList <- lapply(zoneSp, function(s){
-    nicher(dat = dat, bw = bw, b1 = b1, b2 = b2, s = s,
-           w1 = w1, w2 = w2, xmn = xmn, xmx = xmx)
+    nicher(dat = dat, b1 = b1, b2 = b2, s = s, envNm = envNm,
+           xmn = xmn, xmx = xmx, w1 = w1, w2 = w2, bw = bw)
   })
   do.call(rbind, sList)
 }
