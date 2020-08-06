@@ -9,8 +9,7 @@ library(doParallel)
 
 source('species_kde_buildr.R')
 day <- as.Date(date(), format = "%a %b %d %H:%M:%S %Y")
-spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv',
-                   stringsAsFactors = FALSE)
+spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv')
 dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
 envNm <- 'temp_ym'
 spp <- unique(dList$temp_ym_0m$sp$species)
@@ -30,7 +29,7 @@ for (i in 1:length(bins)){
 }
 
 # * WARNING * - this could take a couple hours
-bw <- 'nrd0'
+bw <- 'SJ-ste'
 pkg <- c('pracma','GoFKernel','kerneval')
 pt1 <- proc.time()
 registerDoParallel(nCore)
