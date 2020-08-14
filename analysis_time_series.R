@@ -171,22 +171,10 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
 
 mods4l <- lapply(longSpp, evoFit, dat = tsDf, 
                  sampDat = samp, spDat = spAttr, nmods = 'four') 
-# longSpp2 <- setdiff(longSpp, 'Globigerinella calida6')
-# mods4l <- lapply(longSpp2, evoFit, dat = tsDf, method='Joint',
-#                  sampDat = samp, spDat = spAttr, nmods = 'four') 
 mods4 <- do.call('rbind', mods4l)
 
-# when G calida6 excluded, using method='Joint', SURFACE
-# GRW       Stasis StrictStasis          URW 
-# 6            8            7           10
-# IN-HABITAT, joint
-# GRW       Stasis StrictStasis          URW 
-# 2            9            8           12
 table(mods4$bestMod)
 table(mods4$samplingMod)
-# when G calida6 excluded, using method='Joint', SURFACE
-# GRW StrictStasis          URW 
-# 1            7           23 
 mean(mods4$r); sd(mods4$r)
 
 # Spp vs sampling evo mode ------------------------------------------------
