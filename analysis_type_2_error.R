@@ -195,12 +195,11 @@ pt2 <- proc.time()
 outNm <- paste0('Data/niche-xtremes-simulations_',bw,'_SS_',day,'.rds')
 saveRDS(kdeSum, outNm)
 
-# TIME-SAVNG OPTION:
+# TIME-SAVNG OPTION
 # if the script has already been run once, the niche summaries were exported
-# so read them in here instead of running the code chunk above
+# so read them in here instead of running the code chunk above:
 
-# kdeSum <- readRDS('Data/niche-xtremes-simulations_SJ-ste_SS_2020-08-04.rds')
-# kdeSum <- readRDS('Data/niche-xtremes-simulations_SJ-ste_SS_2020-08-05.rds')
+# kdeSum <- readRDS('Data/niche-xtremes-simulations_SJ-ste_SS_2020-08-12.rds')
 
 # Results -----------------------------------------------------------------
 
@@ -227,7 +226,7 @@ isDetected <- apply(Hmat, 2, function(dat){
   cwAvg <- mean(dat[cwRows])
   cwAvg > ccAvg & cwAvg > wwAvg
 })
-sum(isDetected)/nSim
+sum(isDetected)/length(kdeSum)
 
 # multi-panel plot
 
