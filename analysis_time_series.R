@@ -6,7 +6,7 @@ library(gridExtra)
 library(tidyr)
 
 # set whether to run analyses on surface-level or in-habitat niches
-ss <- TRUE
+ss <- FALSE
 
 # Data prep ---------------------------------------------------------------
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
@@ -103,6 +103,7 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
   # also subset the sampling time series to the same bins, for comparison
   sBins <- sp$bin
   
+  # TODO add conditional to use surface samp data if specified above
   # lookup the species' habitat and use corresponding depth for sampling data
   sShort <- substr(s, 1, (nchar(s)-2))
   attrRow <- grep(paste0(sShort,'*'), spDat$species)
@@ -135,12 +136,12 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
                        oldest = 'first', reset.time = FALSE)
   
   # some sample variances are not equal, so use pool=FALSE for all sequences
-  if (l > 13 & nmods=='nine'){
-    modsSp <- fit9models(ts, method=method, silent=TRUE, pool=FALSE)
-    modsSamp <- fit9models(tsSamp, method=method, silent=TRUE, pool=FALSE)
+  if (l > 13 & nmods == 'nine'){
+    modsSp <- fit9models(ts, method = method, silent = TRUE, pool = FALSE)
+    modsSamp <- fit9models(tsSamp, method = method, silent = TRUE, pool = FALSE)
   } else {
-    modsSp <- fit4models(ts, method=method, silent=TRUE, pool=FALSE) 
-    modsSamp <- fit4models(tsSamp, method=method, silent=TRUE, pool=FALSE) 
+    modsSp <- fit4models(ts, method = method, silent = TRUE, pool = FALSE) 
+    modsSamp <- fit4models(tsSamp, method = method, silent = TRUE, pool = FALSE) 
   }
   # From the package documentation:
   # 'Method = "Joint" is a full likelihood approach, considering each time-series as a joint sample
@@ -156,6 +157,14 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
   # Error in optim(p0, fn = logL.joint.URW, control = cl, method = meth, lower = c(NA,  : 
   # non-finite value supplied by optim
   
+  # compare trait-tracking model against general stasis
+  diffs <- diff(sampSame$m)
+  track <- opt.covTrack(ts, z = diffs, pool = FALSE)
+  stasBroad <- fitSimple(ts, model='Stasis', method = method, pool = FALSE)
+  cmpr2mods <- compareModels(track, stasBroad, silent = TRUE)
+  cmprWts <- cmpr2mods$modelFits$Akaike.wt
+  bestOf2 <- row.names(cmpr2mods$modelFits)[which.max(cmprWts)]
+  
   modes <- c('GRW','URW','Stasis','StrictStasis')
   wts <- sapply(modes, function(m) modsSp$modelFits[m,'Akaike.wt'])
   modNm <- names(which.max(wts))
@@ -164,8 +173,12 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
   sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
   sampEvo <- row.names(modsSamp$modelFits)[sampMx]
   
+  # omega is the estimated variance for white noise stasis models
+  omega <- modsSp$parameters$Stasis['omega']
+  
   out <- data.frame(sp = s, l = l, start = strt, r = sCor, 
-                    bestMod = modNm, t(wts), samplingMod = sampEvo)
+                    bestMod = modNm, t(wts), samplingMod = sampEvo,
+                    trackVsStasis = bestOf2, stasisVar = omega)
   out
 }
 
@@ -176,6 +189,12 @@ mods4 <- do.call('rbind', mods4l)
 table(mods4$bestMod)
 table(mods4$samplingMod)
 mean(mods4$r); sd(mods4$r)
+table(mods4$trackVsStasis)
+
+# report the variance estimated for white noise models
+stasMods <- mods4$bestMod == 'Stasis'
+stasVar <- mods4$stasisVar[stasMods]
+summary(stasVar)
 
 # Spp vs sampling evo mode ------------------------------------------------
 
@@ -217,6 +236,8 @@ print(bubbl)
 dev.off()
 
 # Spp time series ---------------------------------------------------------
+
+# TODO plot SE instead of SD, to reflect what's used in model fitting
 
 # Missing sp-bin combinations have already been removed from the df object.
 # Add them back in so that the time series are plotted with gaps.
