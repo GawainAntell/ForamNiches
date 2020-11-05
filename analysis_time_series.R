@@ -88,6 +88,8 @@ tsDf <- splitSpp[keepBool,]
 
 # Evo models --------------------------------------------------------------
 
+modes <- c('TrackCovariate','GRW','URW','Stasis','StrictStasis')
+
 # Convert an environmental variable name to habitat name
 trnslt <- function(txt){ 
   switch(txt, 
@@ -138,14 +140,20 @@ evoFit <- function(s, dat, sampDat, spDat, nmods = 'four', method = 'AD'){
                        tt = sampSame$scaledT, 
                        oldest = 'first', reset.time = FALSE)
   
-  # some sample variances are not equal, so use pool=FALSE for all sequences
-  if (l > 13 & nmods == 'nine'){
-    modsSp <- fit9models(ts, method = method, silent = TRUE, pool = FALSE)
-    modsSamp <- fit9models(tsSamp, method = method, silent = TRUE, pool = FALSE)
-  } else {
-    modsSp <- fit4models(ts, method = method, silent = TRUE, pool = FALSE) 
-    modsSamp <- fit4models(tsSamp, method = method, silent = TRUE, pool = FALSE) 
-  }
+  # Fit each of the 5 models individually, to compare all later
+  # (cannot use fit3models or fit4models and automatically compare w covTrack).
+  # Some sample variances are not equal, so use pool=FALSE for all sequences
+  stasStrict <- fitSimple(ts, model = 'StrictStasis', 
+                          method = method, pool = FALSE)
+  stasBroad  <- fitSimple(ts, model = 'Stasis', 
+                          method = method, pool = FALSE)
+  urw <-        fitSimple(ts, model = 'URW',
+                          method = method, pool = FALSE)
+  grw <-        fitSimple(ts, model = 'GRW',
+                          method = method, pool = FALSE)
+  diffs <- diff(sampSame$m)
+  track <- opt.covTrack(ts, z = diffs, pool = FALSE)
+  
   # From the package documentation:
   # 'Method = "Joint" is a full likelihood approach, considering each time-series as a joint sample
   # from a multivariate normal distribution. Method = "AD" is a REML approach that uses the differences
@@ -160,57 +168,56 @@ evoFit <- function(s, dat, sampDat, spDat, nmods = 'four', method = 'AD'){
   # Error in optim(p0, fn = logL.joint.URW, control = cl, method = meth, lower = c(NA,  : 
   # non-finite value supplied by optim
   
-  # compare trait-tracking model against general stasis
-  diffs <- diff(sampSame$m)
-  track <- opt.covTrack(ts, z = diffs, pool = FALSE)
-  stasBroad <- fitSimple(ts, model='Stasis', method = method, pool = FALSE)
-  cmpr2mods <- compareModels(track, stasBroad, silent = TRUE)
-  cmprWts <- cmpr2mods$modelFits$Akaike.wt
-  bestOf2 <- row.names(cmpr2mods$modelFits)[which.max(cmprWts)]
-  
-  modes <- c('GRW','URW','Stasis','StrictStasis')
+  # Compare all 5 models. Export parameters from best fit for supplemental table.
+  modsSp <- compareModels(stasStrict, stasBroad, urw, grw, track, silent = TRUE)
   wts <- sapply(modes, function(m) modsSp$modelFits[m,'Akaike.wt'])
   modNm <- names(which.max(wts))
   
-  # check what model would be predicted by sampling alone for the given time bins
+  # Check what model would be predicted by sampling alone for the given time bins
+  # Note: cannot fit track covariate model, because enviro is the covariate!
+  modsSamp <- fit4models(tsSamp, method = method, silent = TRUE, pool = FALSE)
   sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
   sampEvo <- row.names(modsSamp$modelFits)[sampMx]
   
-  # omega is the estimated variance for white noise stasis models
-  omega <- modsSp$parameters$Stasis['omega']
-  
-  out <- data.frame(sp = s, l = l, start = strt, r = sCor, 
-                    bestMod = modNm, t(wts), samplingMod = sampEvo,
-                    trackVsStasis = bestOf2, stasisVar = omega)
-  out
+  # Output a list with 2 elements: dataframe to make Fig 2,
+  # plus list of model parameters for supplemental table
+  smryDf <- data.frame(sp = s, l = l, start = strt, r = sCor, 
+                      bestMod = modNm, t(wts), samplingMod = sampEvo)
+  params <- modsSp$parameters[modNm]
+  list(fig = smryDf, tbl = params)
 }
 
-mods4l <- lapply(longSpp, evoFit, dat = tsDf, 
+modsL <- lapply(longSpp, evoFit, dat = tsDf, 
                  sampDat = samp, spDat = spAttr, nmods = 'four') 
-mods4 <- do.call('rbind', mods4l)
 
-table(mods4$bestMod)
-table(mods4$samplingMod)
-mean(mods4$r); sd(mods4$r)
-table(mods4$trackVsStasis)
+# Reformat into 2 separate dataframe for separate figure and table
+# There's surely a much tidier way to do this with dplyr
+getParams <- function(x) x$tbl
+paramsL <- lapply(modsL, getParams)
+names(paramsL) <- longSpp
+getDf <- function(x) t(x$fig)
+modsDfM <- sapply(modsL, getDf)
+modsDf <- data.frame(t(modsDfM))
+names(modsDf) <- c('sp', 'l', 'start', 'r', 'bestMod', modes, 'samplingMod')
+numCols <- c('r', modes)
+modsDf[,numCols] <- apply(modsDf[,numCols], 2, as.numeric)
 
-# report the variance estimated for white noise models
-stasMods <- mods4$bestMod == 'Stasis'
-stasVar <- mods4$stasisVar[stasMods]
-summary(stasVar)
+table(modsDf$bestMod)
+table(modsDf$samplingMod)
+# perhaps better to report IQR/95% than SD, so as not to risk confusion with SE:
+summary(modsDf$r); quantile(modsDf$r, probs = c(0.025, 0.975))
 
 # Spp vs sampling evo mode ------------------------------------------------
 
-evoModes <- c('StrictStasis','Stasis','URW','GRW')
-# if using 9 models, add:
-# 'Punc-1','Stasis-URW','Stasis-GRW','URW-Stasis','GRW-Stasis'
+# Easier to read figures with model complexity increasing left to right
+evoModes <- rev(modes)
 
 xy <- expand.grid(spMode=evoModes, sampMode=evoModes, stringsAsFactors=FALSE)
 xy$n <- NA
 for (i in 1:nrow(xy)){
   x <- xy$sampMode[i]
   y <- xy$spMode[i]
-  same <- which(mods4$samplingMod == x & mods4$bestMod == y)
+  same <- which(modsDf$samplingMod == x & modsDf$bestMod == y)
   n <- length(same)
   xy$n[i] <- n
 }
@@ -315,29 +322,32 @@ if (ss){
 
 # first 3 letters of sp epithet are unique except for ruber and rubescens
 # but BEWARE if crassula and crassaformis are later both included
-mods4$sp <- gsub('Globoturborotalita rubescens6','Globoturborotalita rbs6',
-                 mods4$sp)
-mods4$seq <- ''
-for (i in 1:nrow(mods4)){
-  binom <- mods4$sp[i]
+modsDf$sp <- gsub('Globoturborotalita rubescens6','Globoturborotalita rbs6',
+                  modsDf$sp)
+modsDf$seq <- ''
+for (i in 1:nrow(modsDf)){
+  binom <- modsDf$sp[i]
   nmVect <- strsplit(binom, ' ')[[1]]
   abrv <- paste(substr(nmVect[1], 1, 2), 
                  substr(nmVect[2], 1, 3), sep='.')
   # if the species already has sequences, add a distinct suffix
-  nrep <- length(grep(abrv, mods4$seq))
+  nrep <- length(grep(abrv, modsDf$seq))
   abrvUniq <- paste0(abrv, nrep+1)
-  mods4$seq[i] <- abrvUniq
+  modsDf$seq[i] <- abrvUniq
 }
 
-abrvOrdr <- order(mods4$seq)
-mods4 <- mods4[abrvOrdr,]
-modLong <- pivot_longer(mods4, cols = all_of(evoModes), 
+abrvOrdr <- order(modsDf$seq)
+modsDf <- modsDf[abrvOrdr,]
+modLong <- pivot_longer(modsDf, cols = all_of(evoModes), 
                         names_to = 'model', values_to = 'weight')
-modLong$model <- factor(modLong$model, levels = rev(evoModes))
+modLong$model <- factor(modLong$model, levels = modes)
 modLong$seq <- factor(modLong$seq, levels = rev(unique(modLong$seq)))
 
-colr <- c('StrictStasis'='#283593', 'Stasis'='#5dade2', 
-          'URW'='#FFC300', 'GRW'='#FF5733')
+colr <- c('StrictStasis' = '#283593', 
+          'Stasis'       = '#5dade2', 
+          'URW'          = '#FFC300', 
+          'GRW'          = '#FF5733',
+          'TrackCovariate' = '#000000')
 
 bars <- 
   ggplot() +
@@ -350,16 +360,19 @@ bars <-
                      expand = c(0, 0), limits = c(0, 1.2),
                      breaks = seq(0, 1, by = 0.25)) +
   theme(legend.position = 'top',
+        legend.text = element_text(size = 8),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
         panel.grid = element_blank()) +
   scale_colour_manual(name = element_blank(), values = colr, 
                       aesthetics = 'fill', limits = evoModes,
-                      labels = c('Strict stasis','Stasis','Random walk','Directional walk')) +
+                      labels = c('Strict stasis','Stasis',
+                                 'Random walk','Directional walk',
+                                 'Tracking')) +
   guides(fill = guide_legend(nrow = 2))
 barsFlip <- 
   bars +
   geom_text(aes(x = seq, y = 1.1, label = l), 
-            data = mods4, hjust = 1, size = 3.2) +
+            data = modsDf, hjust = 1, size = 3.2) +
   coord_flip()
 
 if (ss){
