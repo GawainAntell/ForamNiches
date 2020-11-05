@@ -6,7 +6,7 @@ library(gridExtra)
 library(tidyr)
 
 # set whether to run analyses on surface-level or in-habitat niches
-ss <- FALSE
+ss <- TRUE
 
 # Data prep ---------------------------------------------------------------
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
@@ -97,18 +97,21 @@ trnslt <- function(txt){
   )
 }
 
-evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
-  spBool <- dat$sp==s
+evoFit <- function(s, dat, sampDat, spDat, nmods = 'four', method = 'AD'){
+  spBool <- dat$sp == s
   sp <- dat[spBool,]
   # also subset the sampling time series to the same bins, for comparison
   sBins <- sp$bin
   
-  # TODO add conditional to use surface samp data if specified above
-  # lookup the species' habitat and use corresponding depth for sampling data
-  sShort <- substr(s, 1, (nchar(s)-2))
-  attrRow <- grep(paste0(sShort,'*'), spDat$species)
-  hab <- spDat$DepthHabitat[attrRow]
-  lvl <- trnslt(hab)
+  if (ss){
+    lvl <- 'temp_ym_0m'
+  } else {
+    # lookup the species' habitat and use corresponding depth for sampling data
+    sShort <- substr(s, 1, (nchar(s)-2))
+    attrRow <- grep(paste0(sShort,'*'), spDat$species)
+    hab <- spDat$DepthHabitat[attrRow]
+    lvl <- trnslt(hab)
+  }
   sampDpth <- sampDat[[lvl]]
   sampBool <- sampDpth$bin %in% sBins
   sampSame <- sampDpth[sampBool,]
@@ -117,7 +120,7 @@ evoFit <- function(s, dat, sampDat, spDat, nmods='four', method='AD'){
   # too much autocorrelation in residuals of mean vs. MAT so use KDE optimum
   # peLm <- lm(sp$pe ~ sampSame$m)
   # acf(peLm$residuals)
-  sCor <- cor(sp$pe, sampSame$m, method='pear')
+  sCor <- cor(sp$pe, sampSame$m, method = 'pear')
   
   # ages must start at 0
   sampSame$scaledT <- sp$scaledT <- 1:nrow(sp) -1
@@ -207,24 +210,24 @@ xy$n <- NA
 for (i in 1:nrow(xy)){
   x <- xy$sampMode[i]
   y <- xy$spMode[i]
-  same <- which(mods4$samplingMod==x & mods4$bestMod==y)
+  same <- which(mods4$samplingMod == x & mods4$bestMod == y)
   n <- length(same)
   xy$n[i] <- n
 }
-xy$spMode <- factor(xy$spMode, levels=evoModes)
-xy$sampMode <- factor(xy$sampMode, levels=evoModes)
-empty <- xy$n==0
+xy$spMode <- factor(xy$spMode, levels = evoModes)
+xy$sampMode <- factor(xy$sampMode, levels = evoModes)
+empty <- xy$n == 0
 xy <- xy[!empty,]
 
 bubbl <- 
-  ggplot(data=xy, aes(x=sampMode, y=spMode, size=n)) +
+  ggplot(data = xy, aes(x = sampMode, y = spMode, size = n)) +
   theme_bw() +
-  geom_text(aes(label=n), nudge_x=0.05, nudge_y=0.05) +
-  scale_x_discrete(name = 'Sampling model', drop=FALSE) +
-  scale_y_discrete(name = 'Species model', drop=FALSE) +
-  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+  geom_text(aes(label = n), nudge_x = 0.05, nudge_y = 0.05) +
+  scale_x_discrete(name = 'Sampling model', drop = FALSE) +
+  scale_y_discrete(name = 'Species model', drop = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
         legend.position = 'none') +
-  scale_size(range=c(4,8))
+  scale_size(range = c(4,8))
 
 if (ss){
   bubblNm <- paste0('Figs/evo-mode-bubble-matrix_SS_', day, '.pdf')
@@ -237,8 +240,6 @@ dev.off()
 
 # Spp time series ---------------------------------------------------------
 
-# TODO plot SE instead of SD, to reflect what's used in model fitting
-
 # Missing sp-bin combinations have already been removed from the df object.
 # Add them back in so that the time series are plotted with gaps.
 combos <- expand.grid(spp, bins)
@@ -246,6 +247,9 @@ colnames(combos) <- c('sp', 'bin')
 df <- merge(combos, df, all.x = TRUE, by = c('sp', 'bin'))
 spSort <- sort(spp)
 df$sp <- factor(df$sp, levels = spSort)
+
+# plot SE instead of SD, to reflect what's used in model fitting
+df$se <- df$sd / sqrt(df$n1)
 
 xtick <- paste(seq(600, 0, by = -200))
 xbreak <- seq(-600, 0, by = 200)
@@ -255,7 +259,7 @@ tsPlot <-
   scale_y_continuous(name = 'Mean annual temperature at occupied sites') +
   scale_x_continuous(name = 'Age (ka)', expand = c(0.01, 0),
                      breaks = xbreak, labels = xtick) +
-  geom_ribbon(aes(x = -bin, ymin = m-sd, ymax = m+sd), 
+  geom_ribbon(aes(x = -bin, ymin = m-se, ymax = m+se), 
               fill = 'grey50', alpha = 0.5, size = 0.4) + 
   geom_line(aes(x = -bin, y = m), size = 0.5) + 
   facet_wrap(~sp) +
@@ -277,13 +281,15 @@ nlvl <- length(samp)
 lvlNms <- c(' Sea level',' Surface habitat',
             ' Surface-subsurface habitat',' Subsurface habitat')
 for (i in 1:nlvl){
+  sampLvl <- samp[[i]]
+  sampLvl$se <- sampLvl$sd / sqrt(sampLvl$nsite)
   sampPlot <- 
-    ggplot(data=samp[[i]])+
+    ggplot(data = sampLvl)+
     theme_bw() +
     ggtitle(lvlNms[i]) +
-    scale_y_continuous(limits = c(2.5, 30), expand = c(0,0)) +
+    scale_y_continuous(limits = c(7, 23), expand = c(0,0)) +
     scale_x_continuous(expand = c(0.01,0), breaks = xbreak, labels = xtick) +
-    geom_ribbon(aes(x = -bin, ymin = m-sd, ymax = m+sd), 
+    geom_ribbon(aes(x = -bin, ymin = m-se, ymax = m+se), 
                 fill = 'grey50', alpha = 0.5, size = 0.4) + 
     geom_line(aes(x = -bin, y = m), size = 0.5) +
     theme(axis.title = element_blank())
@@ -294,7 +300,7 @@ for (i in 1:nlvl){
 if (ss){
   pg <- plot_grid(plotlist = plotL, nrow = 2, labels = 'AUTO', 
                   label_size = 14, hjust = -0.7) 
-  yGrob <- textGrob('Temperature at sample sites', 
+  yGrob <- textGrob('Mean annual temperature at sample sites', 
                     gp = gpar(fontface="bold"), rot = 90)
   xGrob <- textGrob('Age (ka)', 
                      gp = gpar(fontface="bold"))
