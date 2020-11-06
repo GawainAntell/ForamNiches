@@ -4,6 +4,7 @@ library(cowplot)
 library(grid)
 library(gridExtra)
 library(tidyr)
+library(xtable)
 
 # set whether to run analyses on surface-level or in-habitat niches
 ss <- TRUE
@@ -85,6 +86,8 @@ for (s in epithets){
 }
 keepBool <- splitSpp$sp %in% longSpp
 tsDf <- splitSpp[keepBool,]
+# order species list so alphabetical in parameter table
+longSpp <- sort(longSpp)
 
 # Evo models --------------------------------------------------------------
 
@@ -192,7 +195,7 @@ modsL <- lapply(longSpp, evoFit, dat = tsDf,
 
 # Reformat into 2 separate dataframe for separate figure and table
 # There's surely a much tidier way to do this with dplyr
-getParams <- function(x) x$tbl
+getParams <- function(x) unlist(x$tbl)
 paramsL <- lapply(modsL, getParams)
 names(paramsL) <- longSpp
 getDf <- function(x) t(x$fig)
@@ -384,3 +387,27 @@ if (ss){
 pdf(barNm, width=3.4252+0.3, height=6)
 barsFlip
 dev.off()
+
+# Table of parameters -----------------------------------------------------
+
+if (ss){
+  # All species models are best fit with either strict or broad stasis, for SS
+  table(modsDf$bestMod)
+  
+  staticSpp  <- which(modsDf$bestMod == 'Stasis')
+  vStaticSpp <- which(modsDf$bestMod == 'StrictStasis')
+  staticTbl  <- do.call('rbind', paramsL[staticSpp])
+  vStaticVect <- do.call('rbind', paramsL[vStaticSpp])
+  # add a column of blanks for variance in the 'very static model' table
+  vStaticTbl <- cbind(vStaticVect, 'NA')
+  tbls <- data.frame(rbind(vStaticTbl, staticTbl))
+  colnames(tbls) <- c('Est. Mean', 'Est. Variance')
+  
+  outx <- xtable(tbls, align = c('l','r','r'), digits = 2,
+                 caption = 'Parameter estimates from trait evolution models')
+  tblNm <- paste0('Figs/evo-model-parameters_SS_',day,'.tex')
+  if (ss){
+    print(outx, file = tblNm, include.rownames = TRUE,
+          caption.placement = 'top')
+  }
+}
