@@ -45,6 +45,11 @@ bsum <- function(d){
 }
 samp <- lapply(dList, bsum)
 
+# report correlation between species' mean and optimum MAT
+mVsOpt <- cor.test(df$m, df$pe)
+round(mVsOpt$estimate, 2)
+round(mVsOpt$conf.int, 2)
+
 # Deal with incomplete sp ts ----------------------------------------------
 
 # rename species so non-consecutive sequences have a numerical suffix
@@ -102,10 +107,10 @@ trnslt <- function(txt){
   )
 }
 
-evoFit <- function(s, dat, sampDat, spDat, nmods = 'four', method = 'AD'){
+evoFit <- function(s, dat, sampDat, spDat, method = 'AD', ss = TRUE){
   spBool <- dat$sp == s
   sp <- dat[spBool,]
-  # also subset the sampling time series to the same bins, for comparison
+  # also subset the sampling time series to the same bins, for cov-track model
   sBins <- sp$bin
   
   if (ss){
@@ -128,7 +133,7 @@ evoFit <- function(s, dat, sampDat, spDat, nmods = 'four', method = 'AD'){
   sCor <- cor(sp$pe, sampSame$m, method = 'pear')
   
   # ages must start at 0
-  sampSame$scaledT <- sp$scaledT <- 1:nrow(sp) -1
+  sp$scaledT <- 1:nrow(sp) -1
   
   # save metadata about the time series
   l <- nrow(sp)
@@ -137,11 +142,6 @@ evoFit <- function(s, dat, sampDat, spDat, nmods = 'four', method = 'AD'){
   ts <- as.paleoTS(mm = sp$m, vv = sp$sd^2, 
                    nn = sp$n, tt = sp$scaledT, 
                    oldest = 'first', reset.time = FALSE)
-  tsSamp <- as.paleoTS(mm = sampSame$m, 
-                       vv = sampSame$sd^2, 
-                       nn = sampSame$nsite, 
-                       tt = sampSame$scaledT, 
-                       oldest = 'first', reset.time = FALSE)
   
   # Fit each of the 5 models individually, to compare all later
   # (cannot use fit3models or fit4models and automatically compare w covTrack).
@@ -176,22 +176,16 @@ evoFit <- function(s, dat, sampDat, spDat, nmods = 'four', method = 'AD'){
   wts <- sapply(modes, function(m) modsSp$modelFits[m,'Akaike.wt'])
   modNm <- names(which.max(wts))
   
-  # Check what model would be predicted by sampling alone for the given time bins
-  # Note: cannot fit track covariate model, because enviro is the covariate!
-  modsSamp <- fit4models(tsSamp, method = method, silent = TRUE, pool = FALSE)
-  sampMx <- which.max(modsSamp$modelFits$Akaike.wt)
-  sampEvo <- row.names(modsSamp$modelFits)[sampMx]
-  
   # Output a list with 2 elements: dataframe to make Fig 2,
   # plus list of model parameters for supplemental table
-  smryDf <- data.frame(sp = s, l = l, start = strt, r = sCor, 
-                      bestMod = modNm, t(wts), samplingMod = sampEvo)
+  smryDf <- data.frame(sp = s, l = l, start = strt, 
+                       r = sCor, bestMod = modNm, t(wts))
   params <- modsSp$parameters[modNm]
   list(fig = smryDf, tbl = params)
 }
 
-modsL <- lapply(longSpp, evoFit, dat = tsDf, 
-                 sampDat = samp, spDat = spAttr, nmods = 'four') 
+modsL <- lapply(longSpp, evoFit, dat = tsDf, sampDat = samp, 
+                spDat = spAttr, ss = ss) 
 
 # Reformat into 2 separate dataframe for separate figure and table
 # There's surely a much tidier way to do this with dplyr
@@ -201,52 +195,18 @@ names(paramsL) <- longSpp
 getDf <- function(x) t(x$fig)
 modsDfM <- sapply(modsL, getDf)
 modsDf <- data.frame(t(modsDfM))
-names(modsDf) <- c('sp', 'l', 'start', 'r', 'bestMod', modes, 'samplingMod')
+names(modsDf) <- c('sp', 'l', 'start', 'r', 'bestMod', modes)
 numCols <- c('r', modes)
 modsDf[,numCols] <- apply(modsDf[,numCols], 2, as.numeric)
 
 table(modsDf$bestMod)
-table(modsDf$samplingMod)
-# perhaps better to report IQR/95% than SD, so as not to risk confusion with SE:
-summary(modsDf$r); quantile(modsDf$r, probs = c(0.025, 0.975))
-
-# Spp vs sampling evo mode ------------------------------------------------
-
-# Easier to read figures with model complexity increasing left to right
-evoModes <- rev(modes)
-
-xy <- expand.grid(spMode=evoModes, sampMode=evoModes, stringsAsFactors=FALSE)
-xy$n <- NA
-for (i in 1:nrow(xy)){
-  x <- xy$sampMode[i]
-  y <- xy$spMode[i]
-  same <- which(modsDf$samplingMod == x & modsDf$bestMod == y)
-  n <- length(same)
-  xy$n[i] <- n
-}
-xy$spMode <- factor(xy$spMode, levels = evoModes)
-xy$sampMode <- factor(xy$sampMode, levels = evoModes)
-empty <- xy$n == 0
-xy <- xy[!empty,]
-
-bubbl <- 
-  ggplot(data = xy, aes(x = sampMode, y = spMode, size = n)) +
-  theme_bw() +
-  geom_text(aes(label = n), nudge_x = 0.05, nudge_y = 0.05) +
-  scale_x_discrete(name = 'Sampling model', drop = FALSE) +
-  scale_y_discrete(name = 'Species model', drop = FALSE) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
-        legend.position = 'none') +
-  scale_size(range = c(4,8))
-
-if (ss){
-  bubblNm <- paste0('Figs/evo-mode-bubble-matrix_SS_', day, '.pdf')
-} else {
-  bubblNm <- paste0('Figs/evo-mode-bubble-matrix_hab_', day, '.pdf')
-}
-pdf(bubblNm, width=4, height=4)
-print(bubbl)
-dev.off()
+# perhaps better to report SE/IQR/95% than SD, for consistency elsewhere:
+summary(modsDf$r)
+quantile(modsDf$r, probs = c(0.025, 0.975))
+sdr <- sd(modsDf$r)
+round(sdr, 2)
+n <- length(longSpp)
+round( sdr/sqrt(n), 3)
 
 # Spp time series ---------------------------------------------------------
 
@@ -320,8 +280,39 @@ if (ss){
   dev.off()
 }
 
+# Table of parameters -----------------------------------------------------
+# Export this before the relative model weight figure, which changes row orders
+
+if (ss){
+  # All species models are best fit with either strict or broad stasis, for SS
+  #  table(modsDf$bestMod)
+  
+  staticSpp  <- which(modsDf$bestMod == 'Stasis')
+  vStaticSpp <- which(modsDf$bestMod == 'StrictStasis')
+  staticTbl  <- do.call('rbind', paramsL[staticSpp])
+  vStaticVect <- do.call('rbind', paramsL[vStaticSpp])
+  # add a column of blanks for variance in the 'very static model' table
+  vStaticTbl <- cbind(vStaticVect, 0)
+  tbls <- data.frame(rbind(vStaticTbl, staticTbl))
+  colnames(tbls) <- c('Est. Mean', 'Est. Variance')
+  
+  outx <- xtable(tbls, align = c('l','r','r'), digits = 2,
+                 caption = 'Parameter estimates from trait evolution models')
+  tblNm <- paste0('Figs/evo-model-parameters_SS_',day,'.tex')
+  if (ss){
+    print(outx, file = tblNm, include.rownames = TRUE,
+          caption.placement = 'top')
+  }
+  
+  # report summary statistics on white noise variance term
+  summary(staticTbl[,'Stasis.omega'])
+}
+
 # Relative model support --------------------------------------------------
 # stacked bar chart of support for each evo model, for each sequence
+
+# Easier to read figures with model complexity increasing left to right
+evoModes <- rev(modes)
 
 # first 3 letters of sp epithet are unique except for ruber and rubescens
 # but BEWARE if crassula and crassaformis are later both included
@@ -387,27 +378,3 @@ if (ss){
 pdf(barNm, width=3.4252+0.3, height=6)
 barsFlip
 dev.off()
-
-# Table of parameters -----------------------------------------------------
-
-if (ss){
-  # All species models are best fit with either strict or broad stasis, for SS
-  table(modsDf$bestMod)
-  
-  staticSpp  <- which(modsDf$bestMod == 'Stasis')
-  vStaticSpp <- which(modsDf$bestMod == 'StrictStasis')
-  staticTbl  <- do.call('rbind', paramsL[staticSpp])
-  vStaticVect <- do.call('rbind', paramsL[vStaticSpp])
-  # add a column of blanks for variance in the 'very static model' table
-  vStaticTbl <- cbind(vStaticVect, 'NA')
-  tbls <- data.frame(rbind(vStaticTbl, staticTbl))
-  colnames(tbls) <- c('Est. Mean', 'Est. Variance')
-  
-  outx <- xtable(tbls, align = c('l','r','r'), digits = 2,
-                 caption = 'Parameter estimates from trait evolution models')
-  tblNm <- paste0('Figs/evo-model-parameters_SS_',day,'.tex')
-  if (ss){
-    print(outx, file = tblNm, include.rownames = TRUE,
-          caption.placement = 'top')
-  }
-}
