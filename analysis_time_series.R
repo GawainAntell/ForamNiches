@@ -356,7 +356,10 @@ bars <-
   theme(legend.position = 'top',
         legend.text = element_text(size = 8),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
-        panel.grid = element_blank()) +
+        panel.grid = element_blank(),
+        axis.ticks.x = element_line(size = 0.5, colour = 'grey30'),
+        axis.ticks.length = unit(4, "pt")
+        ) +
   scale_colour_manual(name = element_blank(), values = colr, 
                       aesthetics = 'fill', limits = evoModes,
                       labels = c('Strict stasis','Stasis',
