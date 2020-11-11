@@ -312,13 +312,18 @@ if (ss){
   globVsSamp
   dev.off()
   
+} 
+
+# make supplemental figure: boxplot only
+# export (duplicate) copy for SS to combine in multi-panel fig for comparison
+if (ss){
+  panelsNm <- paste0('Figs/H-vs-climate-extreme_SS_',day,'.pdf')
 } else {
-  # make supplemental figure: panel B only
-  panelsNm <- paste0('Figs/H-vs-climate-extreme_SI_',day,'.pdf')
-  pdf(panelsNm, width = 3.5, height = 3.5)
-  print(ovpBoxs)
-  dev.off()
+  panelsNm <- paste0('Figs/H-vs-climate-extreme_hab_',day,'.pdf')
 }
+pdf(panelsNm, width = 3.5, height = 3.5)
+print(ovpBoxs)
+dev.off()
 
 # Exclude oldest/youngest extremes ----------------------------------------
 
