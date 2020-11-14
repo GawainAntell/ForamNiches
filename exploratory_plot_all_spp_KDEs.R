@@ -155,10 +155,10 @@ hotBins <- c(4, 124, 412)
 # pick 1 surface and 1 subsurface species as examples
 spp <- c('Neogloboquadrina dutertrei','Hirsutella scitula')
 
-sppSurf <- df$temp_ym_surf$sp
+sppSurf  <- df$temp_ym_surf$sp
 sampSurf <- df$temp_ym_surf$samp
-sppSub <- df$temp_ym_sub$sp
-sampSub <- df$temp_ym_sub$samp
+sppSub   <- df$temp_ym_sub$sp
+sampSub  <- df$temp_ym_sub$samp
 
 plotL <- list()  
 
@@ -178,15 +178,10 @@ plotDens <- function(bin, s, bw, xmn, xmx, sppDf, sampDf){
   sBool <- sppDf$species == s & sppDf$bin == bin
   spDat <- sppDf$temp_ym[sBool]
   # in order to plot the rug later, there must be >n discrete KDE points
-  z1 <- tryCatch(
-    transdens(spDat, w = w, bw = bw, reflect = FALSE, 
-              a = xmn, b = xmx, n = 2^10),
-    error = function(err){ list() }
-  ) 
-  if (length(z1)==0){ next }
-  
-  #  pa <- max(z1$y)
-  #  pePos <- which.max(z1$y)
+  z1 <- transdens(spDat, w = w, bw = bw, reflect = FALSE, 
+                  a = xmn, b = xmx, n = 2^10)
+  xlim1 <- min(sampDf$temp_ym)
+  xlim2 <- max(sampDf$temp_ym)
   
   x <- z1$x
   kd <- z1$y
@@ -202,24 +197,22 @@ plotDens <- function(bin, s, bw, xmn, xmx, sppDf, sampDf){
     ggtitle(paste(bin, 'ka')) +
     geom_area(fill = 'lightblue1') +
     geom_line() +
-    # geom_segment(x = pe, xend = pe, y = 0, yend = 1,
-    #              colour = 'blue') +
-    # geom_segment(x = mean(spDat), xend = mean(spDat), 
-    #              y = 0, yend = 1, colour = 'grey20') +
-    geom_hline(yintercept = 0) +
-    geom_rug(aes(x = rugHack), colour = 'grey20',
+    geom_segment(x = xmn, xend = xmn, linetype='dashed',
+                 y = 0, yend = 1, colour = 'grey50') +
+    geom_segment(x = xmx, xend = xmx, linetype='dashed',
+                 y = 0, yend = 1, colour = 'grey50') +
+    geom_rug(aes(x = rugHack), colour = 'grey20', size = 0.4,
              sides = 'b', length = unit(0.045, "npc")) + 
-    # ,outside = TRUE) +
-    #   coord_cartesian(clip = "off") +
-    scale_x_continuous(expand = c(0, 0)) +
-    scale_y_continuous(limits = c(0, 0.11)) +
+    geom_hline(yintercept = 0) +
+    scale_x_continuous(expand = c(0, 0), limits = c(xlim1, xlim2)) +
+    scale_y_continuous(limits = c(0, 0.12)) +
     theme(axis.title.x = element_blank(),
           axis.title.y = element_blank(),
           plot.title = element_text(size = 9))
   sPlot <- sPlot +
     geom_text(aes(fontface = 'plain', family = 'mono'), 
               label = nlab, size = 3.5, # 3.5mm = 10pt
-              x = 0.15 * max(plotDat$x), y = 0.07)
+              x = 0.15 * xlim2, y = 0.07)
   sPlot
 }
 
@@ -227,8 +220,8 @@ for (s in spp){
   if (s=='Neogloboquadrina dutertrei'){
     sppDf <- sppSurf
     sampDf <- sampSurf
-    xmn <- -1.4
-    xmx <- 27.1
+    xmn <- -1.3
+    xmx <- 26.9
   } 
   if (s=='Hirsutella scitula'){
     sppDf <- sppSub
