@@ -8,6 +8,8 @@ library(kerneval)
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 df <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
 
+# for the main text figure, put n-label in title not on panel
+# but do plot lines to indicate optimum and mean MAT
 plotDens <- function(bin, s, bw, xmn, xmx, sppDf, sampDf){
   # calculate w
   sampBool <- sampDf$bin == bin
@@ -32,7 +34,159 @@ plotDens <- function(bin, s, bw, xmn, xmx, sppDf, sampDf){
   if (length(z1)==0){ next }
   
 #  pa <- max(z1$y)
-#  pePos <- which.max(z1$y)
+  pePos <- which.max(z1$y)
+  pe <- z1$x[pePos]
+  
+  x <- z1$x
+  kd <- z1$y
+  x <- c(xmn, x, xmx)
+  kd <- c(0, kd, 0)
+  plotDat <- data.frame(x = x, kd = kd)
+  nlab <- paste0('n=', length(spDat))
+  noNa <- length(x) - length(spDat)
+  plotDat$rugHack <- c(spDat, rep(NA, noNa))
+  sPlot <- 
+    ggplot(data = plotDat, aes(x = x, y = kd)) +
+    theme_classic() +
+    ggtitle(paste(bin, 'ka, n =', length(spDat))) +
+    geom_area(fill = 'orange') +
+    geom_line() +
+    geom_segment(x = pe, xend = pe, y = 0, yend = 1,
+                colour = 'orange3') +
+    geom_segment(x = mean(spDat), xend = mean(spDat), 
+                 y = 0, yend = 1, colour = 'grey20') +
+    geom_segment(x = -1.4, xend = -1.4, linetype='dashed',
+                 y = 0, yend = 1, colour = 'grey50') +
+    geom_segment(x = 27.1, xend = 27.1, linetype='dashed',
+                 y = 0, yend = 1, colour = 'grey50') +
+    geom_rug(aes(x = rugHack), colour = 'grey20', size = 0.4,
+             sides = 'b', length = unit(0.045, "npc")) + 
+    geom_hline(yintercept = 0) +
+    # ,outside = TRUE) +
+    #   coord_cartesian(clip = "off") +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 0.05)) +
+    theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          plot.title = element_text(size = 9))
+  # sPlot <- sPlot +
+  #   geom_text(aes(fontface = 'plain', family = 'mono'), 
+  #             label = nlab, size = 3.5, # 3.5mm = 10pt
+  #             x = 0.15 * max(plotDat$x), y = 0.07)
+  sPlot
+}
+
+# Figure 1 ----------------------------------------------------------------
+
+modCodes <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors = FALSE)
+rAll <- list.files('Data/gcm_annual_mean/')
+rTemp <- rAll[grep('temp', rAll)]
+
+# set blue as low temp value
+colr <- rainbow(40)[c(30:1)]
+
+b1 <- 28
+b2 <- 212
+samp0m <- df$temp_ym_0m$samp
+spp0m <- df$temp_ym_0m$sp
+pachy <- 'Neogloboquadrina pachyderma'
+
+for (b in c(b1, b2)){
+  mod <- modCodes$age_1000ka==b
+  id <- modCodes$id[mod]
+  flPos <- grep(id, rTemp)
+  fl <- rTemp[flPos]
+  rNm <- paste0('Data/gcm_annual_mean/',fl)
+  r <- raster(rNm)
+  prj <- '+proj=laea' 
+  m <- projectRaster(r, crs=prj)
+  
+  mapNm <- paste0('Figs/globe_map_',b,'ka.pdf')
+  pdf(mapNm, width=20, height=20)
+  plot(m, axes=FALSE, box=FALSE, legend=FALSE, col=colr)
+  dev.off()
+  
+  # use N pachyderma as example to go with line drawing
+  sPlot <- plotDens(bin = b, s = pachy, bw = 'SJ-ste',
+           sampDf = samp0m, sppDf = spp0m,
+           xmx=max(samp0m$temp_ym),
+           xmn=min(samp0m$temp_ym)
+           )
+  sShrt <- strsplit(pachy, ' ')[[1]][2]
+  spPlotNm <- paste0('Figs/KDE-example-', sShrt, '-', b, 'ka_', day, '.pdf')
+  pdf(spPlotNm, width=2.5, height=2)
+  print(sPlot)
+  dev.off()
+}
+
+# calculate H distance
+
+# species samples
+sBool1 <- spp0m$species == pachy & spp0m$bin == b1
+spDat1 <- spp0m$temp_ym[sBool1]
+sBool2 <- spp0m$species == pachy & spp0m$bin == b2
+spDat2 <- spp0m$temp_ym[sBool2]
+
+# estimate sampling correction
+sampBool1 <- samp0m$bin == b1
+sampDat1 <- samp0m$temp_ym[sampBool1] 
+densSamp1 <- density(sampDat1, bw = 'SJ-ste') 
+w1 <- approxfun(densSamp1$x, densSamp1$y)
+sampBool2 <- samp0m$bin == b2
+sampDat2 <- samp0m$temp_ym[sampBool2] 
+densSamp2 <- density(sampDat2, bw = 'SJ-ste') 
+w2 <- approxfun(densSamp2$x, densSamp2$y)
+
+xmn <- 1.4
+xmx <- 27.1
+d1 <- transdens(spDat1, w = w1, reflect = FALSE, 
+                a = xmn, b = xmx, bw = 'SJ-ste')
+d2 <- transdens(spDat2, w = w2, reflect = FALSE, 
+                a = xmn, b = xmx, bw = 'SJ-ste')
+h <- hell(d1, d2) 
+round(h, 2)
+# [1] 0.08
+
+# Glacial/IG niches -------------------------------------------------------
+
+coldBins <- c(28, 268, 436)
+hotBins <- c(4, 124, 412)
+
+# pick 1 surface and 1 subsurface species as examples
+spp <- c('Neogloboquadrina dutertrei','Hirsutella scitula')
+
+sppSurf <- df$temp_ym_surf$sp
+sampSurf <- df$temp_ym_surf$samp
+sppSub <- df$temp_ym_sub$sp
+sampSub <- df$temp_ym_sub$samp
+
+plotL <- list()  
+
+plotDens <- function(bin, s, bw, xmn, xmx, sppDf, sampDf){
+  # calculate w
+  sampBool <- sampDf$bin == bin
+  sampDat <- sampDf$temp_ym[sampBool] 
+  # Feflecting the sample curve doesn't change the sp KDE much
+  # except that the ends turn down a bit more (more convexity).
+  # Since it's more complicated and throws warnings, don't do it.
+  densSamp <- density(sampDat, bw = bw) # from=xmn, to=xmx 
+  #  densSamp <- density.reflected(sampSlc, lower=xmn, upper=xmx) 
+  w <- approxfun(densSamp$x, densSamp$y)
+  #  a <- min(densSamp$x)
+  #  b <- max(densSamp$x)
+  
+  sBool <- sppDf$species == s & sppDf$bin == bin
+  spDat <- sppDf$temp_ym[sBool]
+  # in order to plot the rug later, there must be >n discrete KDE points
+  z1 <- tryCatch(
+    transdens(spDat, w = w, bw = bw, reflect = FALSE, 
+              a = xmn, b = xmx, n = 2^10),
+    error = function(err){ list() }
+  ) 
+  if (length(z1)==0){ next }
+  
+  #  pa <- max(z1$y)
+  #  pePos <- which.max(z1$y)
   
   x <- z1$x
   kd <- z1$y
@@ -68,64 +222,6 @@ plotDens <- function(bin, s, bw, xmn, xmx, sppDf, sampDf){
               x = 0.15 * max(plotDat$x), y = 0.07)
   sPlot
 }
-
-# Figure 1 ----------------------------------------------------------------
-
-modCodes <- read.csv('Data/gcm_model_codes.csv', stringsAsFactors = FALSE)
-rAll <- list.files('Data/gcm_annual_mean/')
-rTemp <- rAll[grep('temp', rAll)]
-
-# set blue as low temp value
-colr <- rainbow(40)[c(30:1)]
-
-b1 <- 28
-b2 <- 124
-samp0m <- df$temp_ym_0m$samp
-spp0m <- df$temp_ym_0m$sp
-pachy <- 'Neogloboquadrina pachyderma'
-
-for (b in c(b1, b2)){
-  mod <- modCodes$age_1000ka==b
-  id <- modCodes$id[mod]
-  flPos <- grep(id, rTemp)
-  fl <- rTemp[flPos]
-  rNm <- paste0('Data/gcm_annual_mean/',fl)
-  r <- raster(rNm)
-  prj <- '+proj=laea' 
-  m <- projectRaster(r, crs=prj)
-  
-  mapNm <- paste0('Figs/globe_map_',b,'ka.pdf')
-  pdf(mapNm, width=20, height=20)
-  plot(m, axes=FALSE, box=FALSE, legend=FALSE, col=colr)
-  dev.off()
-  
-  # use N pachyderma as example to go with line drawing
-  sPlot <- plotDens(bin = b, s = pachy,
-           sampDf = samp0m, sppDf = spp0m,
-           xmx=max(samp0m$temp_ym),
-           xmn=min(samp0m$temp_ym)
-           )
-  sShrt <- strsplit(pachy, ' ')[[1]][2]
-  spPlotNm <- paste0('Figs/KDE-example-', sShrt, '-', b, 'ka_', day, '.pdf')
-  pdf(spPlotNm, width=2.5, height=2)
-  print(sPlot)
-  dev.off()
-}
-
-# Glacial/IG niches -------------------------------------------------------
-
-coldBins <- c(28, 268, 436)
-hotBins <- c(4, 124, 412)
-
-# pick 1 surface and 1 subsurface species as examples
-spp <- c('Neogloboquadrina dutertrei','Hirsutella scitula')
-
-sppSurf <- df$temp_ym_surf$sp
-sampSurf <- df$temp_ym_surf$samp
-sppSub <- df$temp_ym_sub$sp
-sampSub <- df$temp_ym_sub$samp
-
-plotL <- list()  
 
 for (s in spp){
   if (s=='Neogloboquadrina dutertrei'){
