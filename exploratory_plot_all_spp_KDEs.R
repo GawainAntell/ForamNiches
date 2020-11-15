@@ -6,7 +6,7 @@ library(testthat)
 library(kerneval)
 
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
-df <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
+df <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
 
 # for the main text figure, put n-label in title not on panel
 # but do plot lines to indicate optimum and mean MAT
