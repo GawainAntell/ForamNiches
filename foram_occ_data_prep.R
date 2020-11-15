@@ -83,7 +83,7 @@ problm3 <- which(occ$coreID=='NA87-22.a')
 examp1 <- occ[problm2[1], coordCols]
 examp2 <- occ[problm3[1], coordCols]
 newLong <- mean(c(examp1$pal.long, examp2$pal.long))
-newLat <- mean(c(examp1$pal.lat, examp2$pal.lat))
+newLat  <- mean(c(examp1$pal.lat, examp2$pal.lat))
 occ$pal.long[c(problm2, problm3)] <- newLong
 occ$pal.lat[ c(problm2, problm3)] <- newLat
 
@@ -143,7 +143,40 @@ sppDat <- occ[,c('species',traits)]
 dupes <- duplicated(sppDat$species)
 sppDat <- sppDat[!dupes,]
 
-# add modern depth ranges to sp-level file
+# remove species from reworked sediment, present younger than their LAD
+
+ranges <- read.csv('Data/final_species_age_ranges_IF_2020-10-29.csv')
+foundSpp <- sppDat$species
+
+# there are 5 species in the dataset not present in the FAD/LAD file
+# because of taxonomic revision
+ranges$Species.name <- gsub('Globoturborotalita druryi', 
+                            'Globigerina druryi', ranges$Species.name)
+# ranges$Species.name <- gsub('Globigerinella siphonifera',
+#                             'Globigerinella radians', ranges$Species.name)
+# classified as a synonym as it has very rarely been used in the fossil record
+ranges$Species.name <- gsub('Dentigloborotalia anfracta',
+                            'Globorotalia anfracta', ranges$Species.name)
+ranges$Species.name <- gsub('Pearsonites broedermanni',
+                            'Igorina broedermanni', ranges$Species.name)
+# ranges$Species.name <- gsub('Menardella menardii',
+#                             'Menardella fimbriata', ranges$Species.name)
+# a morphospecies
+
+rangeRow <- match(foundSpp, ranges$Species.name)
+sppDat$newEnd <- ranges$End[rangeRow]
+rework <- which(sppDat$newEnd > 0)
+reworkSpp <- sppDat$species[rework]
+dies <- occ$species %in% reworkSpp
+occ <- occ[ !dies, ]
+sppDat <- sppDat[-rework,]
+
+# number of species remaining after excluding reworked specimens,
+# but before applying sample size cutoffs
+spp <- intersect(occ$species, sppDat$species)
+length(spp)
+
+# Add modern depth ranges to data -----------------------------------------
 
 # Read in modern depth ranges: Rebotim et al 2017, table 4
 dpthTbl <- read.table('Data/Rebotim_et_al_depth_ranges.txt',
@@ -361,7 +394,6 @@ row.names(df) <- as.character(1:nrow(df))
 # Combine enviro and spp data ---------------------------------------------
 
 # Calculate the Average Living Depth of species in the dataset:
-spp <- unique(df$species) 
 row.names(sppDat) <- sppDat$species
 sppDat <- sppDat[spp,]
 sppDat$ALD <- as.numeric(sppDat$ALD)
@@ -422,13 +454,6 @@ stopImplicitCluster()
 
 # Clean spp data ----------------------------------------------------------
 
-# count how many species are present before sample size vetting
-length(unique(sppEnv$species))
-# [1] 134
-not4 <- (sppEnv$bin != 4)
-length(unique(sppEnv$species[not4]))
-# [1] 107
-
 # remove 199 records where environment is unknown
 naRows <- apply(sppEnv[,allEnvNm], 1, 
                 function(r) any(is.na(r))
@@ -487,6 +512,8 @@ sum(sppEnv$bin == 12)
 
 # read in modified function to reconstruct paleo-coordinates
 source('paleocoords_fcn.R')
+
+# TODO check that for b = 4, fad limit should be changed from > b-4 to >= b-4
 
 # get the sampling universe (env at range-through core sites) per bin
 envSamplr <- function(b){
