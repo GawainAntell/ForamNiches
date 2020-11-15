@@ -12,11 +12,11 @@ day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 
 # Niche data --------------------------------------------------------------
 
-spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv')
+spAttr <- read.csv('Data/foram-spp-data_2020-11-15.csv')
 if (ss){
-  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-07-24.csv')
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-11-15.csv')
 } else {
-  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-07-24.csv')
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-11-15.csv')
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
