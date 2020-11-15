@@ -175,6 +175,7 @@ sppDat <- sppDat[-rework,]
 # but before applying sample size cutoffs
 spp <- intersect(occ$species, sppDat$species)
 length(spp)
+# [1] 58
 
 # Add modern depth ranges to data -----------------------------------------
 
@@ -513,12 +514,16 @@ sum(sppEnv$bin == 12)
 # read in modified function to reconstruct paleo-coordinates
 source('paleocoords_fcn.R')
 
-# TODO check that for b = 4, fad limit should be changed from > b-4 to >= b-4
-
 # get the sampling universe (env at range-through core sites) per bin
 envSamplr <- function(b){
-  # for each bin, find out which cores range through the 8ky interval
-  inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad <= (b+4))
+  # For each bin, find out which cores range through the 8ky interval.
+  # Watch out for very young cores in most recent time bin - 
+  # can have negative LAD/FAD because '0' = 1950
+  if (b == 4){
+    inBin <- which(coreAtts$lad <= (b+4))
+  } else {
+    inBin <- which(coreAtts$fad > (b-4) & coreAtts$lad <= (b+4))
+  }
   slc <- coreAtts[inBin,]
   
   # rotate lat-long coordinates to paleo-locations
