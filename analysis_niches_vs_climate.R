@@ -32,54 +32,66 @@ envNm <- 'temp_ym'
 dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
 
 # mean MAT over the globe, at a standard grid of lat-long points
-glob <- read.csv('Data/global-surface-MAT_10-deg-grid_4ka.csv')
-tSteps <- paste0('X', bins)
-globMean <- colMeans(glob[, tSteps])
+glob <- read.csv('Data/global-MAT_10-deg-grid_8ka.csv')
+# species data are listed oldest to youngest, and only back to 700 ka
+spOrdr <- match(glob$bin, bins)
+keepBins <- ! is.na(spOrdr)
+glob <- glob[spOrdr[keepBins],]
+globMean <- glob$temp_ym_0m
 
 # note the correlation between sample size and bw, for methods
 cor.test(df$bw1, df$n1)
 old <- df$bin > 12
 cor.test(df$bw1[old], df$n1[old])
+# > data:  df$bw1[old] and df$n1[old]
+# > t = 1.6144, df = 1593, p-value = 0.1066
+# > alternative hypothesis: true correlation is not equal to 0
+# > 95 percent confidence interval:
+# >   -0.00868384  0.08932137
+# > sample estimates:
+# >   cor 
+# > 0.04041597
 
-# Scatterplot -------------------------------------------------------------
-
-# Mean species H overlap vs delta sampled (surface) MAT in each bin.
-# H does not indicate direction, only magnitude of niche overlap,
-# so should compare it with absolute differences in available MAT.
-
-sumH <- function(b){
-  bBool <- df$bin==b
-  slc <- df[bBool,]
-  lwrB <- quantile(slc$h, 0.25, na.rm = TRUE)
-  uprB <- quantile(slc$h, 0.75, na.rm = TRUE)
-  avgB <- mean(slc$h, na.rm=TRUE)
-  binN <- nrow(slc)
-  c(bin=b, lwr=lwrB, upr=uprB, h=avgB, nSpp=binN)
-}
-bybin <- sapply(bins, sumH)
-bybin <- data.frame(t(bybin))
-
-# mean MAT at all sampled sites in each bin:
+# note the correlation between sampled and global marine values, for methods
 sampAvg <- vector(length = nbin)
 samp <- dList$temp_ym_0m$samp
 for (i in 1:nbin){
   bBool <- samp$bin==bins[i]
   sampAvg[i] <- mean(samp$temp_ym[bBool])
 }
-# cor(globMean, sampAvg) 
-# > [1] 0.802236
+cor(globMean, sampAvg) 
+# > [1] 0.8014836
 
-# all H values are NA at most recent time step
-Hseq <- bybin[-nrow(bybin),]
+# Scatterplot -------------------------------------------------------------
+
+# Mean species H overlap vs delta global (surface) MAT in each bin.
+# H does not indicate direction, only magnitude of niche overlap,
+# so should compare it with absolute differences in available MAT.
+
+sumH <- function(b){
+  bBool <- df$bin == b
+  slc <- df[bBool,]
+  lwrB <- quantile(slc$h, 0.25, na.rm = TRUE)
+  uprB <- quantile(slc$h, 0.75, na.rm = TRUE)
+  avgB <- mean(slc$h, na.rm = TRUE)
+  binN <- nrow(slc)
+  c(bin = b, lwr = lwrB, upr = uprB, h = avgB, nSpp = binN)
+}
+# 'bins' currently listed oldest to youngest, opposite to 'glob' object order
+Hmat <- sapply(bins, sumH)
+Hseq <- data.frame(t(Hmat))
+
+# all H values are NA at most recent time step (4 ka)
+Hseq <- Hseq[-nrow(Hseq),]
 
 # delta MAT time series is stationary but H series is NOT
-delta <- diff(sampAvg) # diff(globMean)
+delta <- diff(globMean)
 absDelta <- abs(delta)
 Hseq$absDelta <- absDelta
 adfTest(absDelta) 
 acf(absDelta) 
 adfTest(Hseq$h)
-plot(acf(Hseq$h), ci.type="ma")
+plot(acf(Hseq$h))
 # account for non-stationarity and autocorrelation
 arH <- arima(Hseq$h, order=c(1,0,0))
 resid <- as.numeric(arH$residuals)
@@ -89,6 +101,14 @@ arH$coef
 lmH <- lm(resid ~ absDelta) 
 acf(lmH$residuals)
 cor.test(resid, absDelta, method='pear')
+# > data:  resid and absDelta
+# > t = 1.6717, df = 85, p-value = 0.09826
+# > alternative hypothesis: true correlation is not equal to 0
+# > 95 percent confidence interval:
+# >   -0.03349425  0.37496884
+# > sample estimates:
+# >   cor 
+# > 0.1784128
 
 # overplot the most recent boundary crossing in red
 redBool <- Hseq$bin == 12
@@ -107,19 +127,14 @@ deltaPlot <-
                 size = 0.5, colour = 'grey40', alpha=0.5) +
   geom_point() 
 # horizontal error bars don't really make sense -
-# how would one get these for the absolute difference of mean sample MAT?
+# how would one get these for the absolute difference of mean global MAT?
 
 finPlot <- deltaPlot + 
-  geom_errorbar(data = red, size = 0.75, colour = 'red',
-                aes(ymin = lwr.25., ymax = upr.75.)
+  geom_errorbar(data = red, 
+                aes(ymin = lwr.25., ymax = upr.75.),
+                size = 0.75, colour = 'red', width= 0
                 ) +
   geom_point(data = red, colour = 'red', size = 2)
-
-# optional: annotate plot with correlation coefficient
-  # scatrCor <- cor(resid, absDelta, method='pear')
-  # scatrLab <- paste('r =', round(scatrCor, 2))
-  # deltaPlot <- deltaPlot +
-  #   geom_text(label=scatrLab, size=3, x=xmx*0.8, y=0.45)
 
 # PNAS column width is 8.7 cm (3.4252 in)
 if (ss){
@@ -127,7 +142,7 @@ if (ss){
 } else {
   scatrNm <- paste0('Figs/H-vs-delta_hab_',day,'.pdf')
 }
-pdf(scatrNm, width=3.5, height=3.5)
+pdf(scatrNm, width = 3.5, height = 3.5)
 print(finPlot)
 dev.off()
 
@@ -206,9 +221,9 @@ colr <- c('cold-cold' = 'deepskyblue',
 
 # inspect the mean delta MAT for each comparison type
 globDiff <- function(pair){
-  nm1 <- paste0('X', pair['t1'])
-  nm2 <- paste0('X', pair['t2'])
-  abs(globMean[nm1] - globMean[nm2])
+  t1bool <- glob$bin == pair['t1']
+  t2bool <- glob$bin == pair['t2']
+  abs(glob$temp_ym_0m[t1bool] - glob$temp_ym_0m[t2bool])
 }
 intPairs$deltaMAT <- apply(intPairs[,c('t1','t2')], 1, globDiff)
 for (typ in comps){
