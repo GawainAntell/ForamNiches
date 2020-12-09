@@ -27,8 +27,7 @@ nspp <- length(spp)
 binL <- bins[1] - bins[2]
 envNm <- 'temp_ym'
 
-# standardized sampling universe (MAT at core sites) at each of 4 depths
-# dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
+# mean of temperatures at all marine sites in 10 degree grid
 glob <- read.csv('Data/global-MAT_10-deg-grid_8ka.csv')
 
 # report correlation between species' mean and optimum MAT
@@ -200,7 +199,8 @@ modsDf[,numCols] <- apply(modsDf[,numCols], 2, as.numeric)
 
 table(modsDf$bestMod)
 # perhaps better to report SE/IQR/95% than SD, for consistency elsewhere:
-summary(modsDf$r)
+rAvg <- mean(modsDf$r)
+round(rAvg, 3)
 quantile(modsDf$r, probs = c(0.025, 0.975))
 sdr <- sd(modsDf$r)
 round(sdr, 2)
@@ -242,42 +242,6 @@ if (ss){
 pdf(tsNm, width=7.5, height=8)
 print(tsPlot)
 dev.off()
-
-# Sampling time series ----------------------------------------------------
-
-plotL <- list()
-nlvl <- length(samp)
-lvlNms <- c(' Sea level',' Surface habitat',
-            ' Surface-subsurface habitat',' Subsurface habitat')
-for (i in 1:nlvl){
-  sampLvl <- samp[[i]]
-  sampLvl$se <- sampLvl$sd / sqrt(sampLvl$nsite)
-  sampPlot <- 
-    ggplot(data = sampLvl)+
-    theme_bw() +
-    ggtitle(lvlNms[i]) +
-    scale_y_continuous(limits = c(7, 23), expand = c(0,0)) +
-    scale_x_continuous(expand = c(0.01,0), breaks = xbreak, labels = xtick) +
-    geom_ribbon(aes(x = -bin, ymin = m-se, ymax = m+se), 
-                fill = 'grey50', alpha = 0.5, size = 0.4) + 
-    geom_line(aes(x = -bin, y = m), size = 0.5) +
-    theme(axis.title = element_blank())
-  plotL <- append(plotL, list(sampPlot))
-}
-
-# export as compound plot
-if (ss){
-  pg <- plot_grid(plotlist = plotL, nrow = 2, labels = 'AUTO', 
-                  label_size = 14, hjust = -0.7) 
-  yGrob <- textGrob('Mean annual temperature at sample sites', 
-                    gp = gpar(fontface="bold"), rot = 90)
-  xGrob <- textGrob('Age (ka)', 
-                     gp = gpar(fontface="bold"))
-  sampNm <- paste0('Figs/sampling-time-series_by-depth_', day, '.pdf')
-  pdf(sampNm, width = 6, height = 6)
-  grid.arrange(arrangeGrob(pg, left = yGrob, bottom = xGrob))
-  dev.off()
-}
 
 # Table of parameters -----------------------------------------------------
 # Export this before the relative model weight figure, which changes row orders
@@ -380,3 +344,57 @@ if (ss){
 pdf(barNm, width=3.4252+0.3, height=6)
 barsFlip
 dev.off()
+
+# Sampling time series ----------------------------------------------------
+
+# standardized sampling universe (MAT at core sites) at each of 4 depths
+dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
+
+# take mean and SD across sites for supplemental plot
+bsum <- function(d){
+  bMat <- sapply(bins, function(b){
+    bBool <- d$samp$bin==b
+    slc <- d$samp[bBool,]
+    m <- mean(slc$temp_ym)
+    sdv <- sd(slc$temp_ym)
+    cbind(b, m, sdv)
+  })
+  bDf <- data.frame(t(bMat))
+  colnames(bDf) <- c('bin','m','sd')
+  bDf
+}
+samp <- lapply(dList, bsum)
+
+plotL <- list()
+nlvl <- length(samp)
+lvlNms <- c(' Sea level',' Surface habitat',
+            ' Surface-subsurface habitat',' Subsurface habitat')
+for (i in 1:nlvl){
+  sampLvl <- samp[[i]]
+#  sampLvl$se <- sampLvl$sd / sqrt(sampLvl$nsite)
+  sampPlot <- 
+    ggplot(data = sampLvl)+
+    theme_bw() +
+    ggtitle(lvlNms[i]) +
+    scale_y_continuous(limits = c(0, 30), expand = c(0,0)) +
+    scale_x_continuous(expand = c(0.01,0), breaks = xbreak, labels = xtick) +
+    geom_ribbon(aes(x = -bin, ymin = m-sd, ymax = m+sd), 
+                fill = 'grey50', alpha = 0.5, size = 0.4) + 
+    geom_line(aes(x = -bin, y = m), size = 0.5) +
+    theme(axis.title = element_blank())
+  plotL <- append(plotL, list(sampPlot))
+}
+
+# export as compound plot
+if (ss){
+  pg <- plot_grid(plotlist = plotL, nrow = 2, labels = 'AUTO', 
+                  label_size = 14, hjust = -0.7) 
+  yGrob <- textGrob('Mean annual temperature at sample sites', 
+                    gp = gpar(fontface="bold"), rot = 90)
+  xGrob <- textGrob('Age (ka)', 
+                    gp = gpar(fontface="bold"))
+  sampNm <- paste0('Figs/sampling-time-series_by-depth_', day, '.pdf')
+  pdf(sampNm, width = 6, height = 6)
+  grid.arrange(arrangeGrob(pg, left = yGrob, bottom = xGrob))
+  dev.off()
+}
