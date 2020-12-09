@@ -133,5 +133,5 @@ gridMeans <- function(d){
 
 dpthMeans <- sapply(dpths, gridMeans)
 out <- data.frame(cbind(ageSteps, dpthMeans))
-colnames(out) <- c('bin', paste('temp_ym_',c('0m','surf','surfsub','sub')))
+colnames(out) <- c('bin', paste0('temp_ym_',c('0m','surf','surfsub','sub')))
 write.csv(out, 'Data/global-MAT_10-deg-grid_8ka.csv', row.names = FALSE)
