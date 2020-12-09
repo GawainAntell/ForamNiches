@@ -24,8 +24,8 @@ mods <- head(mods, length(age))
 modMeta <- data.frame(id=mods, age_1000ka=age)
 write.csv(modMeta, 'Data/gcm_model_codes.csv', row.names=FALSE)
 
-# spp data binned at 4 ky resolution, so use same for GCMs
-ageSteps <- seq(0, 800, by=4)
+# spp data binned at 8-ky resolution, so use same for GCMs
+ageSteps <- seq(4, 800, by = 8)
 modSbset <- modMeta$age_1000ka %in% ageSteps
 idSbset <- as.character(modMeta$id[modSbset])
 
@@ -102,30 +102,36 @@ pt2 <- proc.time()
 # Goal: univariate time series of global temperatures. Problem:
 # Because of fluctuations in sea ice volume and hence polar surface area,
 # it's important to sample global temperature at standardised sites.
-# Try an equally spaced lat-long grid, but remove any points that
+# Start with a 10-degree lat-long grid, but remove any points that
 # always or occasionally fall on land. As long as the grid is time-constant,
 # any bias from the closer spacing at the poles doesn't matter, 
 # only the relative differences in global mean does.
 
-x <- seq(-170, 180, by=10)
-y <- seq(-80, 80, by=10)
-xy <- expand.grid(x=x,y=y)
+x <- seq(-170, 180, by = 10)
+y <- seq(-80,  90,  by = 10)
+xy <- expand.grid(x = x, y = y)
 xy <- SpatialPoints(xy, proj4string = crs('+init=epsg:4326'))
 
 source('raster_brick_import_fcn.R')
 
+# Ocean depth layers are determined in 'foram occ data prep' script
+dpths <- c(1, 4, 6, 8)
+
 # save MAT from standard global globe as rows=cells, columns=time bins
-# can do any summaries as column operations later
-gridVals <- function(b){
+gridVals <- function(b, d){
   temp <- getBrik(b, envNm='ann_temp_ym_dpth', mods=modMeta)
-  surf <- temp[[1]][[1]]
+  surf <- temp[[1]][[d]]
   extract(surf, xy, method='bilinear') # buffer=150*1000, fun=mean 
 }
-glob <- sapply(ageSteps, gridVals)
-land <- apply(glob, 1, function(x) any(is.na(x)))
-glob <- data.frame(glob)
-colnames(glob) <- ageSteps
-glob$lat <- y
-glob$long <- x
-glob <- glob[!land,]
-write.csv(glob, 'Data/global-surface-MAT_10-deg-grid_4ka.csv', row.names = FALSE)
+
+gridMeans <- function(d){
+  glob <- sapply(ageSteps, gridVals, d = d)
+  land <- apply(glob, 1, function(x) any(is.na(x)))
+  glob <- glob[!land,]
+  colMeans(glob)
+}
+
+dpthMeans <- sapply(dpths, gridMeans)
+out <- data.frame(cbind(ageSteps, dpthMeans))
+colnames(out) <- c('bin', paste('temp_ym_',c('0m','surf','surfsub','sub')))
+write.csv(out, 'Data/global-MAT_10-deg-grid_8ka.csv', row.names = FALSE)
