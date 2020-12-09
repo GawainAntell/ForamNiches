@@ -13,11 +13,11 @@ ss <- TRUE
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
 
 # foram data
-spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv', stringsAsFactors=FALSE)
+spAttr <- read.csv('Data/foram-spp-data_2020-11-15.csv')
 if (ss){
-  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-07-24.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-11-15.csv')
 } else {
-  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-07-24.csv', stringsAsFactors=FALSE)
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-11-15.csv')
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -28,27 +28,18 @@ binL <- bins[1] - bins[2]
 envNm <- 'temp_ym'
 
 # standardized sampling universe (MAT at core sites) at each of 4 depths
-dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
-# get mean, sd, and n across sites in order to fit evo models to sampling seqs
-bsum <- function(d){
-  bMat <- sapply(bins, function(b){
-    bBool <- d$samp$bin==b
-    slc <- d$samp[bBool,]
-    m <- mean(slc$temp_ym)
-    sdv <- sd(slc$temp_ym)
-    nsite <- nrow(slc)
-    cbind(b, m, sdv, nsite)
-  })
-  bDf <- data.frame(t(bMat))
-  colnames(bDf) <- c('bin','m','sd','nsite')
-  bDf
-}
-samp <- lapply(dList, bsum)
+# dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
+glob <- read.csv('Data/global-MAT_10-deg-grid_8ka.csv')
 
 # report correlation between species' mean and optimum MAT
 mVsOpt <- cor.test(df$m, df$pe)
 round(mVsOpt$estimate, 2)
+# > cor 
+# > 0.85
 round(mVsOpt$conf.int, 2)
+# > [1] 0.83 0.86
+# > attr(,"conf.level")
+# > [1] 0.95
 
 # Deal with incomplete sp ts ----------------------------------------------
 
@@ -107,7 +98,7 @@ trnslt <- function(txt){
   )
 }
 
-evoFit <- function(s, dat, sampDat, spDat, method = 'AD', ss = TRUE){
+evoFit <- function(s, dat, globDat, spDat, method = 'AD', ss = TRUE){
   spBool <- dat$sp == s
   sp <- dat[spBool,]
   # also subset the sampling time series to the same bins, for cov-track model
@@ -122,15 +113,13 @@ evoFit <- function(s, dat, sampDat, spDat, method = 'AD', ss = TRUE){
     hab <- spDat$DepthHabitat[attrRow]
     lvl <- trnslt(hab)
   }
-  sampDpth <- sampDat[[lvl]]
-  sampBool <- sampDpth$bin %in% sBins
-  sampSame <- sampDpth[sampBool,]
+  globSame <- globDat[globDat$bin %in% sBins, lvl]
   
   # correlate species response and global MAT.
   # too much autocorrelation in residuals of mean vs. MAT so use KDE optimum
-  # peLm <- lm(sp$pe ~ sampSame$m)
+  # peLm <- lm(sp$pe ~ globSame)
   # acf(peLm$residuals)
-  sCor <- cor(sp$pe, sampSame$m, method = 'pear')
+  sCor <- cor(sp$pe, globSame, method = 'pear')
   
   # ages must start at 0
   sp$scaledT <- 1:nrow(sp) -1
@@ -154,26 +143,35 @@ evoFit <- function(s, dat, sampDat, spDat, method = 'AD', ss = TRUE){
                           method = method, pool = FALSE)
   grw <-        fitSimple(ts, model = 'GRW',
                           method = method, pool = FALSE)
-  diffs <- diff(sampSame$m)
-  track <- opt.covTrack(ts, z = diffs, pool = FALSE)
+  diffs <- diff(globSame)
+  track <-   tryCatch(opt.covTrack(ts, z = diffs, pool = FALSE),
+                     error = function(e){
+                       opt.covTrack(ts, z = diffs, pool = TRUE)
+                       } 
+                     )
   
   # From the package documentation:
   # 'Method = "Joint" is a full likelihood approach, considering each time-series as a joint sample
   # from a multivariate normal distribution. Method = "AD" is a REML approach that uses the differences
   # between successive samples. They perform similarly, but the Joint approach does better under
   # some circumstances (Hunt, 2008).'
+  # 
   # From Hunt 2008:
   # 'joint parameterization  is  better  able  to  correctly  identify  directional  trends. 
   # This advantage increases with sequence length, and is most pronounced when sampling error is high'
-  
-  # HOWEVER, although joint might be better for most series, for 'Globigerinella calida6' 
+  # 
+  # BUT in documentation of tracking model: 'AD parameterization is generally  safer'.
+  #
+  # Although joint might be better for most series/models, for 'Globigerinella calida6' 
   # a fatal error occurs (matrix not full rank) unless pool and hess arguments are modified
   # Error in optim(p0, fn = logL.joint.URW, control = cl, method = meth, lower = c(NA,  : 
   # non-finite value supplied by optim
   
   # Compare all 5 models. Export parameters from best fit for supplemental table.
   modsSp <- compareModels(stasStrict, stasBroad, urw, grw, track, silent = TRUE)
-  wts <- sapply(modes, function(m) modsSp$modelFits[m,'Akaike.wt'])
+  wts <- sapply(modes, function(m){
+    modsSp$modelFits[m, 'Akaike.wt']
+  } )
   modNm <- names(which.max(wts))
   
   # Output a list with 2 elements: dataframe to make Fig 2,
@@ -184,7 +182,8 @@ evoFit <- function(s, dat, sampDat, spDat, method = 'AD', ss = TRUE){
   list(fig = smryDf, tbl = params)
 }
 
-modsL <- lapply(longSpp, evoFit, dat = tsDf, sampDat = samp, 
+modsL <- lapply(longSpp, evoFit, 
+                dat = tsDf, globDat = glob, 
                 spDat = spAttr, ss = ss) 
 
 # Reformat into 2 separate dataframe for separate figure and table
