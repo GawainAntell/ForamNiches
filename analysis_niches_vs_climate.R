@@ -13,11 +13,11 @@ ss <- TRUE
 
 source('species_kde_buildr.R')
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
-spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv')
+spAttr <- read.csv('Data/foram-spp-data_2020-11-15.csv')
 if (ss){
-  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-07-24.csv')
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_SS_2020-11-15.csv')
 } else {
-  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-07-24.csv')
+  df <- read.csv('Data/niche-sumry-metrics_SJ-ste_hab_2020-11-15.csv')
 }
 ordr <- order(df$bin, decreasing = TRUE)
 df <- df[ordr,]
@@ -29,7 +29,7 @@ binL <- bins[1] - bins[2]
 envNm <- 'temp_ym'
 
 # standardized sampling universe (MAT at core sites) at each of 4 depths
-dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
+dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
 
 # mean MAT over the globe, at a standard grid of lat-long points
 glob <- read.csv('Data/global-surface-MAT_10-deg-grid_4ka.csv')
@@ -67,7 +67,7 @@ for (i in 1:nbin){
   sampAvg[i] <- mean(samp$temp_ym[bBool])
 }
 # cor(globMean, sampAvg) 
-# > [1] 0.7734369
+# > [1] 0.802236
 
 # all H values are NA at most recent time step
 Hseq <- bybin[-nrow(bybin),]
@@ -179,7 +179,9 @@ globTseries <- ggplot() +
 # overplot the sampling time series for supplemental figure
 globVsSamp <- globTseries +
   geom_line(data = globDat, aes(x = -bins, y = sampAvg),
-            linetype = 'dashed')
+            linetype = 'dashed') +
+  geom_point(data = globDat, aes(x = -bins, y = sampAvg),
+             size = 1)
 
 # Extreme comparisons -----------------------------------------------------
 
@@ -228,9 +230,9 @@ for (i in 1:nrow(intPairs)){
 # if the script has already been run once, the niche summaries were exported
 # so read them in here instead of running the code chunk below
   # if (ss){
-  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_SJ-ste_SS_2020-07-29.csv')
+  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_SJ-ste_SS_2020-11-15.csv')
   # } else {
-  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_SJ-ste_hab_2020-07-29.csv')
+  #  kdeSum <- read.csv('Data/niche-xtremes-sumry-metrics_SJ-ste_hab_2020-11-15.csv')
   # }
 
 # warning - this could take an hour
@@ -282,8 +284,9 @@ ovpBoxs <- ggplot(data = intPairs) +
 
 # anova(aov(intPairs$avgH ~ intPairs$type)) # SS
   # Response: intPairs$avgH
-  #                Df Sum Sq   Mean Sq F value Pr(>F)
-  # intPairs$type  2 0.01456 0.0072784  1.6149 0.2048
+  #              Df   Sum Sq   Mean Sq F value  Pr(>F)  
+  # intPairs$type  2 0.028647 0.0143237  4.1511 0.01893 *
+  # Residuals     88 0.303650 0.0034506   
 
 # Multipanel plots --------------------------------------------------------
 
@@ -314,7 +317,6 @@ if (ss){
   
 } 
 
-# make supplemental figure: boxplot only
 # export (duplicate) copy for SS to combine in multi-panel fig for comparison
 if (ss){
   panelsNm <- paste0('Figs/H-vs-climate-extreme_SS_',day,'.pdf')
@@ -353,8 +355,10 @@ supBoxs <- ggplot(data = ints6cycle) +
         axis.title.x = element_blank())
 
 if (ss){
-  supBoxNm <- paste0('Figs/H-vs-climate-extreme_6-cycles_',day,'.pdf')
-  pdf(supBoxNm, width = 3.5, height = 3.5)
-  print(supBoxs)
-  dev.off()
+  supBoxNm <- paste0('Figs/H-vs-climate-extreme_6-cycles_SS_',day,'.pdf')
+} else {
+  supBoxNm <- paste0('Figs/H-vs-climate-extreme_6-cycles_hab_',day,'.pdf')
 }
+pdf(supBoxNm, width = 3.5, height = 3.5)
+print(supBoxs)
+dev.off()
