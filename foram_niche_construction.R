@@ -9,8 +9,8 @@ library(doParallel)
 
 source('species_kde_buildr.R')
 day <- as.Date(date(), format = "%a %b %d %H:%M:%S %Y")
-spAttr <- read.csv('Data/foram-spp-data_2020-07-21.csv')
-dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
+spAttr <- read.csv('Data/foram-spp-data_2020-11-15.csv')
+dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
 envNm <- 'temp_ym'
 spp <- unique(dList$temp_ym_0m$sp$species)
 bins <- unique(dList$temp_ym_0m$sp$bin)
