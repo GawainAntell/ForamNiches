@@ -291,56 +291,18 @@ intPairs <- merge(intPairs, Hdf)
 ovpBoxs <- ggplot(data = intPairs) +
   theme_bw() +
   scale_y_continuous(name = 'Intraspecific niche H distance',
-                     limits = c(0, 0.5), expand = c(0, 0)) +
+                     limits = c(0, 0.4), expand = c(0, 0)) +
   geom_boxplot(aes(x = type, y = avgH, fill = type)) +
   scale_fill_manual(values = colr) +
   theme(legend.position = 'none',
-        axis.title.x = element_blank())
+        axis.title.x = element_blank(),
+        axis.text.x  = element_text(size = 8))
 
 # anova(aov(intPairs$avgH ~ intPairs$type)) # SS
   # Response: intPairs$avgH
   #              Df   Sum Sq   Mean Sq F value  Pr(>F)  
   # intPairs$type  2 0.028647 0.0143237  4.1511 0.01893 *
   # Residuals     88 0.303650 0.0034506   
-
-# Multipanel plots --------------------------------------------------------
-
-if (ss){
-  # main text figure
-  aligned <- align_plots(globTseries, ovpBoxs, align = 'h', axis = 'l')
-  mlti <- plot_grid(
-    aligned[[1]], aligned[[2]],
-    ncol = 2,
-    rel_widths = c(1.66,1),
-    labels='AUTO',
-    label_size = 12,
-    label_x = c(0.16, 0.23),
-    vjust=2.3
-  )
-  
-  # full page width is 17.8 cm (7 in)
-  panelsNm <- paste0('Figs/H-vs-climate_panels_main_',day,'.pdf')
-  pdf(panelsNm, width=7, height=2.5)
-  print(mlti)
-  dev.off()
-  
-  # supplemental figure, time series with extra data
-  suppNm <- paste0('Figs/global-vs-sampling_time-series_',day,'.pdf')
-  pdf(suppNm, width = 4.5, height = 3.5)
-  globVsSamp
-  dev.off()
-  
-} 
-
-# export (duplicate) copy for SS to combine in multi-panel fig for comparison
-if (ss){
-  panelsNm <- paste0('Figs/H-vs-climate-extreme_SS_',day,'.pdf')
-} else {
-  panelsNm <- paste0('Figs/H-vs-climate-extreme_hab_',day,'.pdf')
-}
-pdf(panelsNm, width = 3.5, height = 3.5)
-print(ovpBoxs)
-dev.off()
 
 # Exclude oldest/youngest extremes ----------------------------------------
 
@@ -357,23 +319,69 @@ sapply(ints$maxAge, getN)
 
 tossRows <- union(which(intPairs$t1 == 4 | intPairs$t1 == 668), 
                   which(intPairs$t2 == 4 | intPairs$t2 == 668)  
-                  )
+)
 ints6cycle <- intPairs[-tossRows,]
 
 supBoxs <- ggplot(data = ints6cycle) +
   theme_bw() +
-  scale_y_continuous(name = 'Intraspecific niche H distance',
-                     limits=c(0, 0.5), expand=c(0,0)) +
-  geom_boxplot(aes(x=type, y=avgH, fill=type)) +
-  scale_fill_manual(values=colr) +
-  theme(legend.position='none',
-        axis.title.x = element_blank())
+  scale_y_continuous(limits=c(0, 0.4), expand=c(0,0)) +
+  geom_boxplot(aes(x = type, y = avgH, fill = type)) +
+  scale_fill_manual(values = colr) +
+  theme(legend.position = 'none',
+        axis.text.x  = element_text(size = 8),
+        axis.title.x  =  element_blank(),
+        axis.title.y  =  element_blank(),
+        axis.text.y   = element_blank(),
+        axis.ticks.y  = element_blank()
+        )
+
+# Multipanel plots --------------------------------------------------------
 
 if (ss){
-  supBoxNm <- paste0('Figs/H-vs-climate-extreme_6-cycles_SS_',day,'.pdf')
+  # main text figure: 3 panels, time series above both boxplot versions
+  lwrRow <- plot_grid(
+    ovpBoxs, supBoxs,
+    ncol = 2,
+    rel_widths = c(1, 0.93),
+    labels = c('B','C'),
+    label_size = 12,
+    label_x = c(0.22, 0.085),
+    vjust = 2.3
+  )
+  mlti <- plot_grid(
+    globTseries, lwrRow,
+    labels = c('A', ''),
+    ncol = 1,
+    rel_heights = c(0.8, 1),
+    label_x = 0.11,
+    vjust = 2.3
+  )
+  
+  # full page width is 17.8 cm (7 in)
+  panelsNm <- paste0('Figs/H-vs-climate_panels_main_',day,'.pdf')
+  pdf(panelsNm, width = 5, height = 4)
+  print(mlti)
+  dev.off()
+  
+  # supplemental figure, time series with extra data
+  suppNm <- paste0('Figs/global-vs-sampling_time-series_',day,'.pdf')
+  pdf(suppNm, width = 4.5, height = 3.5)
+  globVsSamp
+  dev.off()
 } else {
-  supBoxNm <- paste0('Figs/H-vs-climate-extreme_6-cycles_hab_',day,'.pdf')
+  
+  # supplemental figure: both boxplots, habitat approach
+  boxs2 <- plot_grid(
+    ovpBoxs, supBoxs,
+    ncol = 2,
+    rel_widths = c(1, 0.93),
+    labels = 'AUTO',
+    label_size = 12,
+    label_x = c(0.22, 0.085),
+    vjust = 2.3
+  )
+  panelsNm <- paste0('Figs/H-vs-climate-extreme_hab_',day,'.pdf')
+  pdf(panelsNm, width = 5, height = 2.5)
+  print(boxs2)
+  dev.off()
 }
-pdf(supBoxNm, width = 3.5, height = 3.5)
-print(supBoxs)
-dev.off()
