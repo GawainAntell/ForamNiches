@@ -148,6 +148,7 @@ round(h, 2)
 # [1] 0.08
 
 # Glacial/IG niches -------------------------------------------------------
+# Supplemental Figure 1
 
 coldBins <- c(28, 268, 436)
 hotBins <- c(4, 124, 412)
@@ -283,3 +284,121 @@ tooSmol <- which(ss$temp_ym < -1.4)
 ss$trunc[tooBig] <- 'high'
 ss$trunc[tooSmol] <- 'low'
 table(ss$trunc)/nrow(ss)
+
+# H-value reference examples ----------------------------------------------
+# Supplemental Figure 2
+
+normPdf <- function(x, shft){
+  dnorm(x, (25 + shft), sd=9.7)
+}
+
+cauchyPdf <- function(x, shft){
+  shft <- 1.5^(shft)*50/1.5^(50)
+  dcauchy(x, location=(25+shft), scale=0.39)
+}
+# With the given location and scale, 99% of Cauchy distribution mass falls from 0-50 
+# p <- 0.99 + pcauchy(0, location=25, scale=0.39)
+# qcauchy(p, location=25, scale=0.39)
+
+chsqPdf <- function(x, shft){
+  dchisq((x-shft), df=4)
+  # dchisq((x-shft)/3.76, df=4)
+}
+# The chi-sq distribution with 4 degrees of freedom is short-tailed, 
+# so one needn't shift a paired chi-sq distribution as far away to achieve non-overlap
+# qchisq(0.99, df=4)*3.76
+
+# mixture of normal distributions, as in Chiu 1996, but this one is less peaky
+mixPdf <- function(x, shft){
+  d1 <- 0.75 * dnorm(x, (27+shft), 6)
+  d2 <- 0.25 * dnorm(x, (11+shft), 4)
+  d1 + d2
+}
+
+# Return H for a given pair of niche shapes (PDFs) and positions.
+overlapr <- function(fun1, fun2, shft, a, b){
+  pdf1 <- switch(fun1, 'norm'=normPdf, 'cauchy'=cauchyPdf, 'chsq'=chsqPdf, 'mix'=mixPdf)
+  pdf2 <- switch(fun2, 'norm'=normPdf, 'cauchy'=cauchyPdf, 'chsq'=chsqPdf, 'mix'=mixPdf)
+  intgrnd <- function(x) sqrt(pdf1(x, 0) * pdf2(x, shft))
+  int <- integral(intgrnd, a, b, no_intervals = 12) 
+  # for norm vs norm, shft=10, H is .024 instead of 0.35 if integrated over -Inf to Inf
+  H2 <- (1 - int)
+  #  I <- 1 - H^2
+  #  data.frame(fun1, fun2, shft, H)
+  sqrt(H2)
+}
+
+shftVals <- seq(0, 50, by=0.5)
+Hseq <- vector()
+for(s in shftVals){
+  H <- overlapr('norm', 'cauchy', s, a = 0, b = 100)
+  Hseq <- c(Hseq, H)
+}
+normCauch <- data.frame(shift = shftVals, H = Hseq)
+
+# *plots -------------------------------------------------------------------
+
+u <- 1:100
+norm1 <- normPdf(u, 0)
+plotEmpt <- ggplot() +
+  theme_classic() +
+  scale_x_continuous(limits = c(0, 100), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 0.05), expand = c(0, 0),
+                     name = 'Density') +
+  theme(axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+
+# for H = 0.25, shift norm dist by 6.9
+H1 <- overlapr('norm','norm', 6.9, a = 0, b = 100)
+ttl1 <- paste('H =', round(H1, 2))
+norm2 <- normPdf(u, 6.9)
+df1 <- data.frame(x = u, pdf1 = norm1, pdf2 = norm2)
+plot1 <- plotEmpt +
+  ggtitle(ttl1) +
+  geom_line(data = df1, aes(x = x, y = pdf1), size = 1) +
+  geom_line(data = df1, aes(x = x, y = pdf2), size = 1) 
+plot1
+
+# for H = 0.5, shift norm dist by 14.7
+norm3 <- normPdf(u, 14.7)
+H2 <- overlapr('norm','norm', 14.7, a = 0, b = 100)
+ttl2 <- paste('H =', sprintf('%0.2f', round(H2, 2)))
+df2 <- data.frame(x = u, pdf1 = norm1, pdf2 = norm3)
+plot2 <- plotEmpt +
+  ggtitle(ttl2) +
+  geom_line(data = df2, aes(x = x, y = pdf1), size = 1) +
+  geom_line(data = df2, aes(x = x, y = pdf2), size = 1) 
+plot2
+
+# norm vs. mixed distribution, H = 0.25
+mix <- mixPdf(u, 7.6)
+H3 <- overlapr('norm','mix', 7.6, a = 0, b = 100)
+ttl3 <- paste('H =', round(H3, 2))
+df3 <- data.frame(x = u, pdf1 = norm1, pdf2 = mix)
+plot3 <- plotEmpt +
+  ggtitle(ttl3) +
+  geom_line(data = df3, aes(x = x, y = pdf1), size = 1) +
+  geom_line(data = df3, aes(x = x, y = pdf2), size = 1) 
+plot3
+
+# norm vs. chi-sq, H = 0.57
+chsq <- chsqPdf(u, 19.5)
+H4 <- overlapr('norm','chsq', 19.5, a = 0, b = 100)
+ttl4 <- paste('H =', round(H4, 2))
+df4 <- data.frame(x = u, pdf1 = norm1, pdf2 = chsq)
+plot4 <- plotEmpt +
+  ggtitle(ttl4) +
+  geom_line(data = df4, aes(x = x, y = pdf1), size = 1) +
+  geom_line(data = df4, aes(x = x, y = pdf2), size = 1) +
+  scale_y_continuous('Density', limits = c(0, 0.2), expand = c(0, 0))
+plot4
+
+day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
+panelNm <- paste0('H-reference-values_4-panels_', day, '.pdf')
+pdf(panelNm, width = 5, height = 5)
+plot_grid(plot1, plot2, plot3, plot4, 
+          ncol = 2, scale = 0.9,
+          labels = 'AUTO', label_size = 14,
+          label_x = 0.05, vjust = 2.5
+)
+dev.off()
