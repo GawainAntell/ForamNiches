@@ -135,3 +135,18 @@ dpthMeans <- sapply(dpths, gridMeans)
 out <- data.frame(cbind(ageSteps, dpthMeans))
 colnames(out) <- c('bin', paste0('temp_ym_',c('0m','surf','surfsub','sub')))
 write.csv(out, 'Data/global-MAT_10-deg-grid_8ka.csv', row.names = FALSE)
+
+# note the vertical and horizontal variance in temperature
+# (use 4 ka as an example time bin)
+temp <- getBrik(4, envNm='ann_temp_ym_dpth', mods=modMeta)
+surf <- temp[[1]][[1]]
+deep <- temp[[1]][[19]]
+dif <- surf - deep
+# vertical range in MAT
+summary(dif)
+range(values(dif), na.rm = TRUE)
+mean(values(dif), na.rm = TRUE)
+# horizontal range in MAT
+summary(surf)
+range(values(surf), na.rm = TRUE)
+mean(values(surf), na.rm = TRUE)
