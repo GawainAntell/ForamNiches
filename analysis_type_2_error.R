@@ -11,13 +11,13 @@ library(cowplot)
 
 source('species_kde_buildr.R')
 day <- as.Date(date(), format="%a %b %d %H:%M:%S %Y")
-nSim <- 10
+nSim <- 100
 bw <- 'SJ-ste'
 envNm <- 'temp_ym'
 nCore <- detectCores() - 1
 
 # standardized sampling universe (MAT at core sites) at each of 4 depths
-dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-07-21.rds')
+dList <- readRDS('Data/spp-and-sampling-data_list-by-depth_2020-11-15.rds')
 df <- dList$temp_ym_0m$sp
 bins <- unique(df$bin)
 spp <- unique(df$sp)
@@ -269,7 +269,25 @@ topC <- boxer(2, noX = TRUE, noY = TRUE)
 topR <- boxer(3, noX = TRUE, noY = TRUE)
 lwrL <- boxer(4)
 lwrC <- boxer(5, noY = TRUE)
-lwrR <- boxer(6, noY = TRUE)
+
+# last plot (lower right) has mean for each of 100 simulations
+simMean <- function(vals, type){
+  mat <- data.frame(vals, type)
+  aggregate(vals ~ type, mean, dat = mat)
+}
+meansL <- apply(Hmat, 2, simMean, type = plotdat$type)
+meansDf <- do.call('rbind', meansL)
+lwrR <- ggplot(data = meansDf, aes(x = type, y = vals)) +
+  theme_bw() +
+  geom_point(alpha = 0.7, pch = 16, position = 'jitter',
+             aes(color = type)) +
+  scale_y_continuous(limits = c(0.15, 0.3), expand = c(0, 0.01)) +
+  scale_fill_manual(values = colr) +
+  theme(legend.position = 'none',
+        axis.title = element_blank(),
+        axis.text.x = element_text(size = 6)
+  )
+
 boxNm <- paste0('Figs/H-vs-climate-extreme_simulated_',day,'.pdf')
 pdf(boxNm, width = 6, height =4)
 plot_grid(
@@ -277,8 +295,7 @@ plot_grid(
   lwrL, lwrC, lwrR,
   ncol = 3, rel_widths = c(1.2, 1, 1),
   labels = 'AUTO', label_size = 12,
-  hjust = c(-5, -2, -2, -5, -2, -2.4), 
-  vjust = c(2, 2, 2, 1.85, 1.85, 1.85)
+  hjust = c(-5, -2, -2, -5, -2, -4.75), 
+  vjust = rep(2, 6)
 )
 dev.off()
-
