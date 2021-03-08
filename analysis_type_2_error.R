@@ -282,7 +282,7 @@ lwrR <- ggplot(data = meansDf, aes(x = type, y = vals)) +
   geom_point(alpha = 0.7, pch = 16, position = 'jitter',
              aes(color = type)) +
   scale_y_continuous(limits = c(0.15, 0.3), expand = c(0, 0.01)) +
-  scale_fill_manual(values = colr) +
+  scale_color_manual(values = colr) +
   theme(legend.position = 'none',
         axis.title = element_blank(),
         axis.text.x = element_text(size = 6)
