@@ -245,6 +245,7 @@ dev.off()
 
 # Table of parameters -----------------------------------------------------
 # Export this before the relative model weight figure, which changes row orders
+# NB the numeric suffices here need to be updated to match barplot fig labels
 
 if (ss){
   # All species models are best fit with either strict or broad stasis, for SS
@@ -279,7 +280,7 @@ evoModes <- rev(modes)
 
 # first 3 letters of sp epithet are unique except for ruber and rubescens
 # but BEWARE if crassula and crassaformis are later both included
-modsDf$sp <- gsub('Globoturborotalita rubescens6','Globoturborotalita rbs6',
+modsDf$sp <- gsub('Globoturborotalita rubescens13','Globoturborotalita rbs13',
                   modsDf$sp)
 modsDf$seq <- ''
 for (i in 1:nrow(modsDf)){
